@@ -143,6 +143,17 @@ def aggiorna_seo_prodotto(
     )
 
 
+@mcp.tool()
+def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str) -> dict:
+    """Scrive titolo SEO e meta description di una categoria prodotto, via wp-admin.
+
+    A differenza dei prodotti, per le categorie Yoast non rilegge i campi SEO
+    scritti via DB diretto: questo tool passa dalla UI reale di modifica
+    categoria, l'unico modo affidabile di aggiornarli.
+    """
+    return browser_tools.aggiorna_seo_categoria(term_id, titolo_seo, meta_description)
+
+
 @mcp.resource("info://ora")
 def ora_corrente() -> str:
     """Data e ora corrente del server."""

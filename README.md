@@ -26,7 +26,11 @@ un display disponibile (`DISPLAY`).
   mostra uno screenshot da controllare, poi salva o scarta).
 - `lista_stato_seo_prodotti` / `leggi_seo_prodotto` / `aggiorna_seo_prodotto`
   — lettura/scrittura di titolo SEO, meta description e parola chiave focus
-  (campi Yoast). Solo I/O: l'ottimizzazione dei testi la fa chi chiama i tool.
+  (campi Yoast) sui prodotti, via DB diretto. Solo I/O: l'ottimizzazione dei
+  testi la fa chi chiama i tool.
+- `aggiorna_seo_categoria` — stessa cosa ma per le categorie prodotto
+  (tassonomia `product_cat`), via browser: per i termini di tassonomia Yoast
+  non rilegge i campi scritti via DB diretto (vedi Note).
 
 ## Comandi
 
@@ -61,3 +65,14 @@ un display disponibile (`DISPLAY`).
   (`wp eval 'do_action("litespeed_purge_all");'`) e, se tocchi campi Yoast, la
   sua tabella indicizzata (`wp yoast index --reindex --skip-confirmation`) —
   altrimenti il sito continua a servire contenuti vecchi anche a dati aggiornati.
+- Per i **termini di tassonomia** (categorie prodotto) `wp yoast index --reindex`
+  non basta: l'indicizzabile Yoast del termine resta vuoto anche dopo, a
+  prescindere da reindex/cache flush/`wp term update`. L'unico modo affidabile
+  trovato è salvare davvero dalla UI di modifica categoria (da cui
+  `aggiorna_seo_categoria`, via browser, non DB diretto) — i campi titolo/meta
+  description li lì sono editor Draft.js, non `<input>`, vanno riempiti
+  cliccando + selezionando tutto + ridigitando, non con `.fill()`.
+- Per le **pagine** (es. la pagina Shop) il DB diretto funziona, ma a volte
+  `wp yoast index --reindex` da solo non rigenera l'indicizzabile: in quel
+  caso un `wp post update <id> --post_title=<stesso titolo>` (che attiva i
+  hook reali di WordPress) forza la ricostruzione corretta.

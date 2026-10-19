@@ -253,3 +253,46 @@ def crea_prodotto(
         "url": page.url,
         "screenshot": _screenshot(page, f"prodotto-{prodotto_id}-pubblicato"),
     }
+
+
+def _scrivi_campo_draftjs(page: Page, selettore: str, testo: str) -> None:
+    """I campi titolo/meta description di Yoast (anche sui termini di
+    tassonomia) sono editor React/Draft.js, non <input>: .fill() non li
+    aggiorna. Si clicca, si seleziona tutto e si ridigita.
+    """
+    campo = page.locator(selettore)
+    campo.click()
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Backspace")
+    page.keyboard.type(testo)
+
+
+def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str) -> dict:
+    """Scrive titolo SEO e meta description di una categoria prodotto (tassonomia
+    product_cat) passando dalla UI di wp-admin.
+
+    A differenza dei prodotti, per i termini di tassonomia Yoast non rilegge i
+    propri campi se scritti via DB diretto (anche dopo un reindex): serve
+    passare dal salvataggio reale della pagina di modifica categoria, che
+    aggiorna correttamente l'indicizzabile interno di Yoast.
+    """
+    site = os.environ["WP_SITE_URL"]
+    page = _get_logged_in_page()
+    url = f"{site}/wp-admin/term.php?taxonomy=product_cat&tag_ID={term_id}&post_type=product"
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_selector("#name")
+    page.wait_for_timeout(1500)  # il metabox Yoast (React) si monta dopo il DOM ready
+
+    _scrivi_campo_draftjs(page, "#yoast-google-preview-title-metabox", titolo_seo)
+    _scrivi_campo_draftjs(page, "#yoast-google-preview-description-metabox", meta_description)
+
+    page.wait_for_timeout(500)
+    page.click("input[type=submit][value='Aggiorna']")
+    page.wait_for_selector("#name")
+
+    return {
+        "stato": "aggiornato",
+        "term_id": term_id,
+        "titolo_seo": titolo_seo,
+        "meta_description": meta_description,
+    }
