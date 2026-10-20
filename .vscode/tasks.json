@@ -4,7 +4,7 @@
     {
       "label": "MCP Inspector",
       "type": "shell",
-      "command": "npx -y @modelcontextprotocol/inspector uv run mio-mcp-server",
+      "command": "npx -y @modelcontextprotocol/inspector uv run push_contempt_mcp",
       "problemMatcher": [],
       "isBackground": true
     },

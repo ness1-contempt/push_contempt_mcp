@@ -1,4 +1,4 @@
-# mio-mcp-server
+# push_contempt_mcp
 
 Server MCP in Python (SDK `mcp` 2.x, classe `MCPServer`) per gestire un
 catalogo WooCommerce: lettura dati via DB diretto, scritture sensibili
@@ -20,7 +20,11 @@ un display disponibile (`DISPLAY`).
 - `lista_prodotti` — lettura diretta dal DB: titolo, sku, prezzo, scorte.
 - `crea_prodotto` — crea e pubblica un prodotto via wp-admin (titolo,
   descrizione, prezzo, categoria, immagini: la prima diventa quella in
-  evidenza, le altre vanno in galleria).
+  evidenza, le altre vanno in galleria). SEO (titolo SEO, meta description,
+  parola chiave focus) e ALT delle immagini vengono impostati in automatico
+  nella stessa chiamata, niente passi separati dopo la creazione. La risposta
+  include `avvisi_seo` (densita' frase chiave, sottotitoli H2/H3, link
+  interni) da controllare prima di considerare il prodotto finito.
 - `prepara_modifica_prezzo_prodotto` / `conferma_modifica_in_corso` /
   `annulla_modifica_in_corso` — modifica prezzo in due fasi (compila e
   mostra uno screenshot da controllare, poi salva o scarta).
@@ -37,20 +41,20 @@ un display disponibile (`DISPLAY`).
 | Cosa | Comando |
 |---|---|
 | Installare/aggiornare le dipendenze | `uv sync` |
-| Avviare il server (stdio) | `uv run mio-mcp-server` |
+| Avviare il server (stdio) | `uv run push_contempt_mcp` |
 | Test | `uv run pytest` |
 | Lint / format | `uv run ruff check --fix . && uv run ruff format .` |
-| Provarlo con MCP Inspector (UI web) | `npx -y @modelcontextprotocol/inspector uv run mio-mcp-server` |
+| Provarlo con MCP Inspector (UI web) | `npx -y @modelcontextprotocol/inspector uv run push_contempt_mcp` |
 | Aggiungere una dipendenza | `uv add <pacchetto>` |
 
 ## Struttura
 
-- `src/mio_mcp_server/server.py` — registrazione dei tool, resource e prompt MCP
-- `src/mio_mcp_server/db.py` — connessione MySQL (letture dirette, a basso rischio)
-- `src/mio_mcp_server/browser_tools.py` — automazione Playwright per le scritture
+- `src/push_contempt_mcp/server.py` — registrazione dei tool, resource e prompt MCP
+- `src/push_contempt_mcp/db.py` — connessione MySQL (letture dirette, a basso rischio)
+- `src/push_contempt_mcp/browser_tools.py` — automazione Playwright per le scritture
   sensibili su wp-admin (prezzo, creazione prodotto)
-- `src/mio_mcp_server/seo_tools.py` — lettura/scrittura campi SEO Yoast
-- `src/mio_mcp_server/__init__.py` — `main()`, entry point
+- `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast
+- `src/push_contempt_mcp/__init__.py` — `main()`, entry point
 - `tests/` — test in-process con `mcp.Client(mcp)`
 - `.mcp.json` — registra il server in Claude Code quando apri questa cartella
 

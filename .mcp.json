@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "mio-mcp-server": {
+    "push_contempt_mcp": {
       "command": "uv",
-      "args": ["run", "--directory", "/home/ness1/Progetti/mio-mcp-server", "mio-mcp-server"]
+      "args": ["run", "--directory", "/home/ness1/Progetti/push_contempt_mcp", "push_contempt_mcp"]
     }
   }
 }

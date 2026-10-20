@@ -1,5 +1,5 @@
 [project]
-name = "mio-mcp-server"
+name = "push_contempt_mcp"
 version = "0.1.0"
 description = "Server MCP in Python"
 readme = "README.md"
@@ -9,10 +9,11 @@ dependencies = [
     "playwright>=1.64.0",
     "pymysql>=1.2.3",
     "python-dotenv>=1.2.4",
+    "requests>=2.32.0",
 ]
 
 [project.scripts]
-mio-mcp-server = "mio_mcp_server:main"
+push_contempt_mcp = "push_contempt_mcp:main"
 
 [build-system]
 requires = ["uv_build>=0.12.22,<0.13.0"]

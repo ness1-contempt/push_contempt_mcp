@@ -1,4 +1,4 @@
-from mio_mcp_server.server import mcp
+from push_contempt_mcp.server import mcp
 
 
 def main() -> None:

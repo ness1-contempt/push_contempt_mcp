@@ -1,6 +1,6 @@
 from mcp import Client
 
-from mio_mcp_server.server import mcp
+from push_contempt_mcp.server import mcp
 
 
 async def test_list_tools():
@@ -14,6 +14,14 @@ async def test_list_tools():
             "prepara_modifica_prezzo_prodotto",
             "conferma_modifica_in_corso",
             "annulla_modifica_in_corso",
+            "controllo_salute_catalogo",
+            "report_vendite_prodotti",
+            "prodotti_sotto_scorta",
+            "scansiona_cartella_prodotti",
+            "leggi_seo_prodotti_selezionati",
+            "calcola_aggiornamento_prezzi",
+            "applica_aggiornamento_prezzi",
+            "purga_cache_sito",
             "lista_stato_seo_prodotti",
             "leggi_seo_prodotto",
             "aggiorna_seo_prodotto",
