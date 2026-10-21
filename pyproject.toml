@@ -3,6 +3,7 @@ name = "push_contempt_mcp"
 version = "0.1.0"
 description = "Server MCP in Python"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = [
     "mcp[cli]>=2.3.0",

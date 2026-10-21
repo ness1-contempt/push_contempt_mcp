@@ -2,7 +2,7 @@
   "mcpServers": {
     "push_contempt_mcp": {
       "command": "uv",
-      "args": ["run", "--directory", "/home/ness1/Progetti/push_contempt_mcp", "push_contempt_mcp"]
+      "args": ["run", "--directory", "${CLAUDE_PROJECT_DIR:-.}", "push_contempt_mcp"]
     }
   }
 }
