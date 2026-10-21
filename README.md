@@ -10,6 +10,9 @@ da automazione browser (Playwright) su wp-admin, quando serve poter
 rivedere una modifica prima che diventi effettiva; la lettura veloce del
 catalogo (`lista_prodotti`) resta su accesso diretto al DB.
 
+Per l'installazione completa (plugin + server + collegamento con
+l'assistente AI, in ordine) vedi [`HOWTO.md`](HOWTO.md).
+
 ## Configurazione
 
 Copia `.env.example` in `.env` e compila:
