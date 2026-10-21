@@ -1,9 +1,12 @@
 """Accesso diretto al DB di WordPress/WooCommerce — solo lettura.
 
-Qui vanno tool a basso rischio e alto volume (liste, ricerche, report).
-Tutto ciò che scrive o ha effetti collaterali (ordini, pagamenti, pubblicazione
-contenuti) passa invece dall'automazione browser in browser_tools.py, così
-l'utente può rivedere l'operazione prima che venga confermata.
+Qui vanno tool a basso rischio e alto volume (liste, ricerche, confronto
+nomi per la scansione cartella prodotti). Le scritture vere e proprie oggi
+passano quasi tutte dalla REST API del plugin push_contempt (vedi
+inventory_tools.py, pricing_tools.py, seo_tools.py, product_tools.py,
+catalog_health.py, sales_tools.py) - solo le due operazioni rimaste su
+automazione browser in browser_tools.py (modifica prezzo con anteprima,
+SEO categoria) non passano né da qui né da REST.
 """
 
 import os
