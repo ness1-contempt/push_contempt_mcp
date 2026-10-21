@@ -48,7 +48,7 @@ una volta aperto un terminale nella cartella `wp-content/plugins`):
 
 ```sh
 cd wp-content/plugins
-git clone <url-repo-push_contempt> push_contempt
+git clone https://github.com/ness1-contempt/push_contempt.git
 cd push_contempt
 npm install
 npm run build
@@ -70,7 +70,7 @@ un'Application Password nativa di WordPress e non scadono da sole.
 Stessi comandi su Windows (PowerShell/CMD), macOS e Linux, da terminale:
 
 ```sh
-git clone <url-repo-push_contempt_mcp>
+git clone https://github.com/ness1-contempt/push_contempt_mcp.git
 cd push_contempt_mcp
 uv sync
 ```
