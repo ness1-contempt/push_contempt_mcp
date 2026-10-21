@@ -48,7 +48,7 @@ def test_crea_prodotto_carica_immagini_e_chiama_endpoint_prodotti(monkeypatch, t
         percorsi_immagini=[str(foto1), str(foto2)],
         alt_immagini=["vista frontale", "vista laterale"],
         frase_chiave_focus="sedia da giardino",
-        titolo_seo="Sedia da giardino | Neofusion",
+        titolo_seo="Sedia da giardino | Negozio di prova",
         meta_description="Scopri la nostra sedia da giardino.",
     )
 

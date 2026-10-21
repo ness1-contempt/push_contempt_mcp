@@ -1,4 +1,4 @@
-"""Invalidazione della cache OpenLiteSpeed per l'ambiente dev Neofusion.
+"""Invalidazione della cache OpenLiteSpeed per l'ambiente di sviluppo locale (ols-docker-env).
 
 Due livelli di cache separati, entrambi devono essere invalidati:
 1. Object cache (Redis, dietro il drop-in object-cache.php di LiteSpeed):
