@@ -21,6 +21,7 @@ from push_contempt_mcp import (
     inventory_tools,
     pricing_tools,
     product_sync,
+    product_tools,
     sales_tools,
     seo_tools,
 )
@@ -32,8 +33,9 @@ mcp = MCPServer(
     name="push_contempt_mcp",
     instructions=(
         "Server MCP di esempio: somma numeri, saluta, fornisce l'ora corrente, "
-        "legge il catalogo prodotti WooCommerce direttamente dal DB e crea/modifica "
-        "prodotti via browser automation su wp-admin."
+        "legge il catalogo prodotti WooCommerce direttamente dal DB, crea nuovi "
+        "prodotti in bozza via REST e modifica prezzi/SEO via REST o browser "
+        "automation su wp-admin."
     ),
 )
 
@@ -101,17 +103,19 @@ def crea_prodotto(
     titolo_seo: str,
     meta_description: str,
 ) -> dict:
-    """Crea e pubblica un nuovo prodotto WooCommerce (titolo, descrizione, prezzo,
+    """Crea un nuovo prodotto WooCommerce IN BOZZA (titolo, descrizione, prezzo,
     categoria, immagini), con SEO e ALT immagini gia' impostati in automatico:
     non serve piu' chiamare aggiorna_seo_prodotto dopo. La prima immagine
     diventa quella in evidenza, le altre vanno nella galleria. Il prezzo va
     scritto con il punto come decimale. `alt_immagini` deve avere un elemento
     per ogni immagine (stesso ordine di percorsi_immagini). La risposta include
     `avvisi_seo`: se non vuoto, la descrizione non rispetta ancora densita'
-    della frase chiave, sottotitoli o link interni - da sistemare. Invalida
-    anche la cache del sito, altrimenti il prodotto nuovo non si vedrebbe online.
+    della frase chiave, sottotitoli o link interni - da sistemare. Non viene
+    pubblicato: resta da rivedere e pubblicare da wp-admin (vedi
+    prodotti_in_bozza e la tab "Carica prodotti" del plugin), quindi non
+    serve invalidare la cache del sito.
     """
-    risultato = browser_tools.crea_prodotto(
+    return product_tools.crea_prodotto(
         titolo,
         descrizione,
         prezzo_regolare,
@@ -122,7 +126,14 @@ def crea_prodotto(
         titolo_seo,
         meta_description,
     )
-    return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def prodotti_in_bozza() -> list[dict]:
+    """Prodotti creati con crea_prodotto e non ancora pubblicati, piu'
+    recenti prima: promemoria di cosa resta da rivedere su wp-admin.
+    """
+    return product_tools.prodotti_in_bozza()
 
 
 @mcp.tool()

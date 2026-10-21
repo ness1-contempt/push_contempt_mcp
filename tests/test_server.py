@@ -17,6 +17,7 @@ async def test_list_tools():
             "controllo_salute_catalogo",
             "report_vendite_prodotti",
             "prodotti_sotto_scorta",
+            "prodotti_in_bozza",
             "scansiona_cartella_prodotti",
             "leggi_seo_prodotti_selezionati",
             "calcola_aggiornamento_prezzi",
