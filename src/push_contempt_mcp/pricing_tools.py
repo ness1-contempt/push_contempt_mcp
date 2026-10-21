@@ -5,8 +5,12 @@ di inventory_tools.py.
 A differenza della vecchia versione a SQL diretto, qui la scrittura passa
 dall'API nativa di WooCommerce (set_regular_price()->save()) lato plugin:
 niente piu' bisogno di replicare a mano _price/sconto attivo o la lookup
-table, e la cache del sito si invalida da sola tramite i hook di WooCommerce
-(verificato: non serve piu' la purge manuale per i cambi di prezzo).
+table. La cache oggetti (dati interni di WooCommerce) si aggiorna da sola
+tramite i hook nativi, MA la page cache (HTML gia' renderizzato, servita
+ai visitatori) no: verificato dal vivo che senza cache_tools.purga_cache()
+il frontend continua a mostrare il prezzo vecchio anche con il DB gia'
+corretto - server.py chiama sempre la purge dopo questo tool, e va
+lasciata cosi'.
 """
 
 import os
