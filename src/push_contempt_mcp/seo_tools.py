@@ -1,10 +1,11 @@
-"""Lettura/scrittura dei campi SEO di Yoast sui prodotti WooCommerce.
+"""Lettura/scrittura dei campi SEO di Yoast sui prodotti WooCommerce: client
+sottile della REST API del plugin push_contempt (vedi
+includes/Rest/SeoStatoController.php e SeoProdottoController.php) - stesso
+principio di inventory_tools.py e pricing_tools.py.
 
-Solo I/O: qui non c'e' nessuna logica di "cosa scrivere" (lunghezza ideale,
+Solo I/O qui: non c'e' nessuna logica di "cosa scrivere" (lunghezza ideale,
 keyword density, ecc.) - quella la fa l'AI che chiama questi tool,
-ragionando sui dati del prodotto. Scrittura diretta sul DB: i campi Yoast
-sono testo semplice senza effetti collaterali/trigger, a differenza del
-prezzo che passa dal browser.
+ragionando sui dati del prodotto.
 """
 
 import os
@@ -13,31 +14,21 @@ import re
 import requests
 from dotenv import load_dotenv
 
-from push_contempt_mcp.db import TABLE_PREFIX, get_connection
-
 load_dotenv()
 
-CAMPI_YOAST = {
-    "titolo_seo": "_yoast_wpseo_title",
-    "meta_description": "_yoast_wpseo_metadesc",
-    "parola_chiave_focus": "_yoast_wpseo_focuskw",
-}
+
+def _auth() -> tuple[str, str]:
+    return (os.environ["WP_APP_USER"], os.environ["WP_APP_PASSWORD"])
 
 
 def lista_stato_seo_prodotti() -> list[dict]:
     """Vista d'insieme: per ogni prodotto pubblicato, titolo SEO/meta description
     impostati o mancanti, e le loro lunghezze (utile per capire dove intervenire).
-
-    Client sottile della REST API del plugin push_contempt (vedi
-    includes/Rest/SeoStatoController.php) - stesso principio di
-    inventory_tools.py. A differenza delle altre funzioni di questo modulo
-    (lettura/scrittura di un singolo prodotto, usate dal flusso AI di
-    ottimizzazione SEO), questa e' solo lettura aggregata, niente AI.
     """
     site = os.environ["WP_SITE_URL"]
     risposta = requests.get(
         f"{site}/wp-json/push-contempt/v1/seo/stato",
-        auth=(os.environ["WP_APP_USER"], os.environ["WP_APP_PASSWORD"]),
+        auth=_auth(),
         verify=False,  # certificato self-signed in locale, vedi inventory_tools.py
         timeout=10,
     )
@@ -48,30 +39,18 @@ def lista_stato_seo_prodotti() -> list[dict]:
 def leggi_seo_prodotto(prodotto_id: int) -> dict:
     """Stato SEO dettagliato di un prodotto, più titolo/descrizione/prezzo come
     contesto per chi deve scrivere i nuovi testi."""
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(
-            f"""
-            SELECT
-                p.ID AS id, p.post_title AS titolo, p.post_content AS descrizione,
-                MAX(CASE WHEN pm.meta_key = '_price' THEN pm.meta_value END) AS prezzo,
-                MAX(CASE WHEN pm.meta_key = '_yoast_wpseo_title' THEN pm.meta_value END)
-                    AS titolo_seo,
-                MAX(CASE WHEN pm.meta_key = '_yoast_wpseo_metadesc' THEN pm.meta_value END)
-                    AS meta_description,
-                MAX(CASE WHEN pm.meta_key = '_yoast_wpseo_focuskw' THEN pm.meta_value END)
-                    AS parola_chiave_focus
-            FROM {TABLE_PREFIX}posts p
-            LEFT JOIN {TABLE_PREFIX}postmeta pm ON pm.post_id = p.ID
-            WHERE p.ID = %s
-            GROUP BY p.ID
-            """,
-            (prodotto_id,),
-        )
-        riga = cursor.fetchone()
-
-    if riga is None:
+    site = os.environ["WP_SITE_URL"]
+    risposta = requests.get(
+        f"{site}/wp-json/push-contempt/v1/seo/prodotto",
+        params={"id": prodotto_id},
+        auth=_auth(),
+        verify=False,
+        timeout=10,
+    )
+    if risposta.status_code == 404:
         return {"errore": f"Nessun prodotto con id {prodotto_id}"}
-    return riga
+    risposta.raise_for_status()
+    return risposta.json()
 
 
 def leggi_seo_prodotti_selezionati(prodotto_ids: list[int]) -> list[dict]:
@@ -83,40 +62,6 @@ def leggi_seo_prodotti_selezionati(prodotto_ids: list[int]) -> list[dict]:
     alcun legame con la creazione), e si evita una chiamata per prodotto.
     """
     return [leggi_seo_prodotto(pid) for pid in prodotto_ids]
-
-
-def scrivi_campi_yoast(
-    prodotto_id: int,
-    titolo_seo: str,
-    meta_description: str,
-    parola_chiave_focus: str,
-) -> dict:
-    """Scrive titolo SEO, meta description e parola chiave focus di un prodotto
-    (sovrascrive i valori esistenti). DB diretto, nessun effetto collaterale.
-
-    Condivisa tra `aggiorna_seo_prodotto` (prodotto gia' pubblicato) e la
-    creazione di un nuovo prodotto in browser_tools.py, cosi' un prodotto
-    nuovo nasce gia' con la SEO impostata invece di richiedere un secondo
-    passo separato.
-    """
-    nuovi_valori = {
-        "titolo_seo": titolo_seo,
-        "meta_description": meta_description,
-        "parola_chiave_focus": parola_chiave_focus,
-    }
-
-    with get_connection() as conn, conn.cursor() as cursor:
-        for campo, meta_key in CAMPI_YOAST.items():
-            cursor.execute(
-                "DELETE FROM wp_postmeta WHERE post_id = %s AND meta_key = %s",
-                (prodotto_id, meta_key),
-            )
-            cursor.execute(
-                "INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (%s, %s, %s)",
-                (prodotto_id, meta_key, nuovi_valori[campo]),
-            )
-
-    return nuovi_valori
 
 
 def aggiorna_seo_prodotto(
@@ -134,7 +79,21 @@ def aggiorna_seo_prodotto(
     if "errore" in prima:
         return prima
 
-    dopo = scrivi_campi_yoast(prodotto_id, titolo_seo, meta_description, parola_chiave_focus)
+    site = os.environ["WP_SITE_URL"]
+    risposta = requests.post(
+        f"{site}/wp-json/push-contempt/v1/seo/prodotto",
+        json={
+            "id": prodotto_id,
+            "titolo_seo": titolo_seo,
+            "meta_description": meta_description,
+            "parola_chiave_focus": parola_chiave_focus,
+        },
+        auth=_auth(),
+        verify=False,
+        timeout=10,
+    )
+    risposta.raise_for_status()
+    dopo = risposta.json()
 
     return {
         "stato": "aggiornato",
