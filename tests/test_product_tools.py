@@ -103,3 +103,30 @@ def test_prodotti_in_bozza_chiama_endpoint_giusto(monkeypatch):
 
     assert chiamate[0] == "https://localhost/wp-json/push-contempt/v1/prodotti/bozze"
     assert risultato == [{"id": 42, "titolo": "Sedia da giardino", "creato": "2026-10-21"}]
+
+
+def test_elenco_prodotti_chiama_endpoint_e_passa_ricerca_e_limite(monkeypatch):
+    chiamate = []
+
+    def get_finto(url, params, auth, verify, timeout):
+        chiamate.append({"url": url, "params": params})
+        return _RispostaFinta([{"id": 58, "titolo": "Gimbal S5", "stato": "publish"}])
+
+    monkeypatch.setattr(requests, "get", get_finto)
+
+    risultato = product_tools.elenco_prodotti(ricerca="gimbal", limite=5)
+
+    assert risultato == [{"id": 58, "titolo": "Gimbal S5", "stato": "publish"}]
+    assert chiamate[0]["url"] == "https://localhost/wp-json/push-contempt/v1/prodotti"
+    assert chiamate[0]["params"] == {"ricerca": "gimbal", "limite": 5}
+
+
+def test_elenco_prodotti_propaga_errori_http(monkeypatch):
+    class RispostaErrore:
+        def raise_for_status(self):
+            raise requests.HTTPError("500")
+
+    monkeypatch.setattr(requests, "get", lambda *a, **k: RispostaErrore())
+
+    with pytest.raises(requests.HTTPError):
+        product_tools.elenco_prodotti()

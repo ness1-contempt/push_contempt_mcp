@@ -15,10 +15,9 @@ import os
 import uuid
 from pathlib import Path
 
+import requests
 from dotenv import load_dotenv
 from playwright.sync_api import Page, sync_playwright
-
-from push_contempt_mcp.db import get_connection
 
 load_dotenv()
 
@@ -72,14 +71,19 @@ def _separatore_decimale_woocommerce() -> str:
     un punto inviato come decimale viene letto come separatore delle migliaia
     (es. "9.99" -> "999") se il sito usa la virgola, come in IT. Va quindi
     tradotto prima di scrivere nel campo.
+
+    Letta via REST (vedi PrezziController::handle_impostazioni), cosi'
+    funziona anche dove il DB non e' raggiungibile dall'esterno.
     """
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT option_value FROM wp_options "
-            "WHERE option_name = 'woocommerce_price_decimal_sep'"
-        )
-        row = cursor.fetchone()
-        return row["option_value"] if row else "."
+    site = os.environ["WP_SITE_URL"]
+    risposta = requests.get(
+        f"{site}/wp-json/push-contempt/v1/prezzi/impostazioni",
+        auth=(os.environ["WP_APP_USER"], os.environ["WP_APP_PASSWORD"]),
+        verify=False,
+        timeout=10,
+    )
+    risposta.raise_for_status()
+    return risposta.json()["separatore_decimale"]
 
 
 def _formatta_prezzo_per_campo(prezzo: str) -> str:

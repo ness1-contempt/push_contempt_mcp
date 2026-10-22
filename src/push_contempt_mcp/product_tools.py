@@ -115,3 +115,24 @@ def prodotti_in_bozza() -> list[dict]:
     )
     risposta.raise_for_status()
     return risposta.json()
+
+
+def elenco_prodotti(ricerca: str = "", limite: int = 20) -> list[dict]:
+    """Catalogo WooCommerce (titolo, sku, prezzo, scorte) via la REST API del
+    plugin push_contempt (vedi includes/Rest/ProdottiController.php),
+    cosi' funziona anche dove il DB non e' raggiungibile dall'esterno
+    (hosting condiviso di un cliente, es. Altervista).
+
+    `ricerca` filtra per titolo (sottostringa, case-insensitive); vuoto =
+    tutti. `limite` negativo = nessun limite.
+    """
+    site = os.environ["WP_SITE_URL"]
+    risposta = requests.get(
+        f"{site}/wp-json/push-contempt/v1/prodotti",
+        params={"ricerca": ricerca, "limite": limite},
+        auth=_auth(),
+        verify=False,
+        timeout=10,
+    )
+    risposta.raise_for_status()
+    return risposta.json()

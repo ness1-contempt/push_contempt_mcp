@@ -12,7 +12,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from push_contempt_mcp.db import TABLE_PREFIX, get_connection
+from push_contempt_mcp import product_tools
 
 ESTENSIONI_IMMAGINE = {".jpg", ".jpeg", ".png", ".webp"}
 FILE_IGNORATI = {"media_ids.json"}
@@ -29,13 +29,10 @@ def _normalizza_nome(nome: str) -> str:
 
 
 def _nomi_prodotti_esistenti() -> set[str]:
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(
-            f"SELECT post_title FROM {TABLE_PREFIX}posts "
-            "WHERE post_type = 'product' AND post_status != 'trash'"
-        )
-        righe = cursor.fetchall()
-    return {_normalizza_nome(r["post_title"]) for r in righe}
+    prodotti = product_tools.elenco_prodotti(limite=-1)
+    return {
+        _normalizza_nome(p["titolo"]) for p in prodotti if p["stato"] != "trash"
+    }
 
 
 def _file_prodotto(cartella: Path) -> tuple[list[str], str | None]:

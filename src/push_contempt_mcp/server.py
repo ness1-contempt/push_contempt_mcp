@@ -25,7 +25,6 @@ from push_contempt_mcp import (
     sales_tools,
     seo_tools,
 )
-from push_contempt_mcp.db import TABLE_PREFIX, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +32,8 @@ mcp = MCPServer(
     name="push_contempt_mcp",
     instructions=(
         "Server MCP di esempio: somma numeri, saluta, fornisce l'ora corrente, "
-        "legge il catalogo prodotti WooCommerce direttamente dal DB, crea nuovi "
-        "prodotti in bozza via REST e modifica prezzi/SEO via REST o browser "
+        "legge il catalogo prodotti WooCommerce via REST, crea nuovi prodotti "
+        "in bozza via REST e modifica prezzi/SEO via REST o browser "
         "automation su wp-admin."
     ),
 )
@@ -55,29 +54,11 @@ def saluta(nome: str, formale: bool = False) -> str:
 
 @mcp.tool()
 def lista_prodotti(ricerca: str = "", limite: int = 20) -> list[dict]:
-    """Elenca i prodotti WooCommerce (lettura diretta dal DB: titolo, sku, prezzo, scorte).
+    """Elenca i prodotti WooCommerce via REST (titolo, sku, prezzo, scorte).
 
     `ricerca` filtra per titolo (sottostringa, case-insensitive); vuoto = tutti.
     """
-    query = f"""
-        SELECT
-            p.ID AS id,
-            p.post_title AS titolo,
-            p.post_status AS stato,
-            MAX(CASE WHEN pm.meta_key = '_sku' THEN pm.meta_value END) AS sku,
-            MAX(CASE WHEN pm.meta_key = '_price' THEN pm.meta_value END) AS prezzo,
-            MAX(CASE WHEN pm.meta_key = '_stock' THEN pm.meta_value END) AS scorte,
-            MAX(CASE WHEN pm.meta_key = '_stock_status' THEN pm.meta_value END) AS stato_scorte
-        FROM {TABLE_PREFIX}posts p
-        LEFT JOIN {TABLE_PREFIX}postmeta pm ON pm.post_id = p.ID
-        WHERE p.post_type = 'product' AND p.post_title LIKE %s
-        GROUP BY p.ID
-        ORDER BY p.post_title
-        LIMIT %s
-    """
-    with get_connection() as conn, conn.cursor() as cursor:
-        cursor.execute(query, (f"%{ricerca}%", limite))
-        return cursor.fetchall()
+    return product_tools.elenco_prodotti(ricerca, limite)
 
 
 @mcp.tool()

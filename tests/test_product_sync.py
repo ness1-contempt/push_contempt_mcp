@@ -1,12 +1,29 @@
 from pathlib import Path
 
-from push_contempt_mcp import product_sync
-from push_contempt_mcp.product_sync import _normalizza_nome, scansiona_cartella_prodotti
+from push_contempt_mcp import product_sync, product_tools
+from push_contempt_mcp.product_sync import (
+    _nomi_prodotti_esistenti,
+    _normalizza_nome,
+    scansiona_cartella_prodotti,
+)
 
 
 def test_normalizza_nome_ignora_maiuscole_accenti_punteggiatura():
     assert _normalizza_nome("Sedia da Giardino") == _normalizza_nome("sedia-da-giardino")
     assert _normalizza_nome("Poltrona Relax") == _normalizza_nome("poltróna  relax!")
+
+
+def test_nomi_prodotti_esistenti_ignora_il_cestino(monkeypatch):
+    monkeypatch.setattr(
+        product_tools,
+        "elenco_prodotti",
+        lambda ricerca="", limite=20: [
+            {"titolo": "Sedia Ufficio", "stato": "publish"},
+            {"titolo": "Vecchia Sedia", "stato": "trash"},
+        ],
+    )
+
+    assert _nomi_prodotti_esistenti() == {_normalizza_nome("Sedia Ufficio")}
 
 
 def _crea_prodotto(tmp_path: Path, categoria: str, nome: str, con_foto: bool, con_txt: bool):
