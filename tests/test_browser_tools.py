@@ -158,3 +158,89 @@ def test_risolvi_sfida_antibot_risolve_sottrazione_e_moltiplicazione():
         pagina = _PaginaFinta(testo)
         assert browser_tools._risolvi_sfida_antibot(pagina) is True
         assert pagina.compilato == atteso
+
+
+class _PaginaFormFinta:
+    """Fake di Page per il form di login: solo i metodi usati da
+    _risolvi_sfida_nel_form."""
+
+    def __init__(self, etichetta=None):
+        self._etichetta = etichetta
+        self.compilati = {}
+
+    def locator(self, _selettore):
+        class _Conteggio:
+            def count(inner):
+                return 0 if self._etichetta is None else 1
+
+        return _Conteggio()
+
+    def inner_text(self, _selettore):
+        return self._etichetta
+
+    def fill(self, selettore, valore):
+        self.compilati[selettore] = valore
+
+
+def test_risolvi_sfida_nel_form_compila_la_somma_jetpack():
+    # Il label reale contiene spazi non separabili (&nbsp;) attorno agli operandi.
+    pagina = _PaginaFormFinta("9 \xa0+\xa0 1 \xa0=\xa0")
+
+    assert browser_tools._risolvi_sfida_nel_form(pagina) is True
+    assert pagina.compilati == {"#jetpack_protect_answer": "10"}
+
+
+def test_risolvi_sfida_nel_form_assente_non_compila_nulla():
+    pagina = _PaginaFormFinta(None)
+
+    assert browser_tools._risolvi_sfida_nel_form(pagina) is False
+    assert pagina.compilati == {}
+
+
+class _RispostaSessione:
+    def __init__(self, status, testo):
+        self.status = status
+        self._testo = testo
+
+    def text(self):
+        return self._testo
+
+
+class _ContestoFinto:
+    def __init__(self, risposta=None, errore=None):
+        self.request = self
+        self._risposta = risposta
+        self._errore = errore
+
+    def get(self, url, **_kw):
+        if self._errore:
+            raise self._errore
+        return self._risposta
+
+
+def test_sessione_valida_solo_con_200_e_admin_bar():
+    ok = _ContestoFinto(_RispostaSessione(200, '<div id="wpadminbar">'))
+    redirect = _ContestoFinto(_RispostaSessione(302, ""))
+    sfida = _ContestoFinto(_RispostaSessione(200, "Risolvi questo problema di matematica"))
+
+    assert browser_tools._sessione_valida(ok, "https://x") is True
+    assert browser_tools._sessione_valida(redirect, "https://x") is False
+    assert browser_tools._sessione_valida(sfida, "https://x") is False
+
+
+def test_sessione_valida_false_se_la_richiesta_fallisce():
+    contesto = _ContestoFinto(errore=browser_tools.PlaywrightError("net::ERR"))
+
+    assert browser_tools._sessione_valida(contesto, "https://x") is False
+
+
+def test_salva_sessione_scrive_file_con_permessi_600(monkeypatch, tmp_path):
+    monkeypatch.setattr(browser_tools, "STATE_FILE", tmp_path / ".auth" / "stato.json")
+
+    class _Contesto:
+        def storage_state(self, path):
+            open(path, "w").write("{}")
+
+    browser_tools._salva_sessione(_Contesto())
+
+    assert (tmp_path / ".auth" / "stato.json").stat().st_mode & 0o777 == 0o600

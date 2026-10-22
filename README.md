@@ -34,6 +34,13 @@ Copia `.env.example` in `.env` e compila:
   headless, vedi i commenti in `browser_tools.py`. Serve quindi un display
   disponibile (`DISPLAY`).
 
+  **Sessione e captcha:** il login passa da una sessione salvata in
+  `.auth/wp_admin_state.json` (permessi 600, in `.gitignore`): finche' il
+  cookie e' valido non si rifa' il login, nemmeno dopo un riavvio del server.
+  Se serve un nuovo login, la somma Jetpack Protect viene risolta da sola,
+  mentre il reCAPTCHA "Non sono un robot" va spuntato a mano nella finestra
+  del browser (si aspetta fino a 2 minuti).
+
 ## Tool disponibili
 
 **Catalogo**

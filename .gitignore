@@ -14,3 +14,6 @@ wheels/
 
 # Screenshot generati dai tool browser
 .screenshots/
+
+# Sessione wp-admin salvata (cookie di login)
+.auth/

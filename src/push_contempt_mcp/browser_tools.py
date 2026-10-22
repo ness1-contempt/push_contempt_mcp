@@ -18,18 +18,39 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 load_dotenv()
 
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent.parent / ".screenshots"
 SCREENSHOT_DIR.mkdir(exist_ok=True)
 
+# Cookie di sessione wp-admin salvati su disco: dopo il primo login (che puo'
+# richiedere un reCAPTCHA da spuntare a mano) i login successivi non servono
+# piu' finche' il cookie e' valido ("Ricordami" = ~14 giorni). Contiene una
+# sessione valida: e' in .gitignore e viene creato con permessi 600.
+STATE_FILE = Path(__file__).resolve().parent.parent.parent / ".auth" / "wp_admin_state.json"
+
+# Quanto aspettare che l'utente completi il reCAPTCHA nella finestra del browser.
+ATTESA_RECAPTCHA_MS = 120_000
+
 _playwright = None
 _browser = None
 _page: Page | None = None
 
 _PATTERN_SFIDA_MATEMATICA = re.compile(r"(\d+)\s*([+\-×x*])\s*(\d+)\s*=")
+
+
+def _calcola_sfida(testo: str) -> int | None:
+    """Legge un'equazione tipo "7 + 2 =" dal testo e ne calcola il risultato."""
+    corrispondenza = _PATTERN_SFIDA_MATEMATICA.search(testo)
+    if not corrispondenza:
+        return None
+    a, operatore, b = corrispondenza.groups()
+    a, b = int(a), int(b)
+    return {"+": a + b, "-": a - b}.get(operatore, a * b)
 
 
 def _risolvi_sfida_antibot(page: Page) -> bool:
@@ -44,18 +65,71 @@ def _risolvi_sfida_antibot(page: Page) -> bool:
     if "problema di matematica" not in testo:
         return False
 
-    corrispondenza = _PATTERN_SFIDA_MATEMATICA.search(testo)
-    if not corrispondenza:
+    risultato = _calcola_sfida(testo)
+    if risultato is None:
         return False
-
-    a, operatore, b = corrispondenza.groups()
-    a, b = int(a), int(b)
-    risultato = {"+": a + b, "-": a - b}.get(operatore, a * b)
 
     page.locator("input[type=text], input[type=number]").first.fill(str(risultato))
     page.get_by_role("button", name=re.compile("Continua")).click()
     page.wait_for_load_state("domcontentloaded")
     return True
+
+
+def _risolvi_sfida_nel_form(page: Page) -> bool:
+    """Il form di login ha di suo una sfida Jetpack Protect ("9 + 1 = [ ]",
+    campo #jetpack_protect_answer): e' un'addizione in chiaro, si risolve qui.
+    Ritorna True se il campo c'era ed e' stato compilato.
+    """
+    if page.locator("#jetpack_protect_answer").count() == 0:
+        return False
+
+    risultato = _calcola_sfida(page.inner_text("label[for=jetpack_protect_answer]"))
+    if risultato is None:
+        return False
+
+    page.fill("#jetpack_protect_answer", str(risultato))
+    return True
+
+
+def _completa_recaptcha(page: Page) -> None:
+    """Il reCAPTCHA v2 ("Non sono un robot") NON si risolve da codice, ed e'
+    proprio il punto: qui si prova solo il click sulla casella (a volte Google
+    la accetta da sola) e poi si aspetta che sia l'utente a completarlo nella
+    finestra del browser (headed), se serve. Il token compare nella textarea
+    #g-recaptcha-response quando la sfida e' superata.
+    """
+    if page.locator(".g-recaptcha").count() == 0:
+        return
+
+    # Il div .g-recaptcha e' nell'HTML subito, ma la textarea del token la crea
+    # lo script di Google quando ha finito di renderizzare il widget.
+    page.wait_for_selector("#g-recaptcha-response", state="attached", timeout=15000)
+
+    def _token_presente() -> bool:
+        return bool(page.eval_on_selector("#g-recaptcha-response", "el => el.value"))
+
+    if _token_presente():
+        return
+
+    try:
+        page.frame_locator("iframe[title=reCAPTCHA]").locator("#recaptcha-anchor").click(
+            timeout=5000
+        )
+    except PlaywrightError:
+        pass  # pazienza: ci pensa l'utente nella finestra
+
+    try:
+        page.wait_for_function(
+            "() => document.querySelector('#g-recaptcha-response')?.value",
+            timeout=ATTESA_RECAPTCHA_MS,
+        )
+    except PlaywrightTimeoutError:
+        raise RuntimeError(
+            "reCAPTCHA del login wp-admin non completato entro "
+            f"{ATTESA_RECAPTCHA_MS // 1000}s: spunta 'Non sono un robot' nella "
+            "finestra del browser aperta dal server MCP e riprova. Una volta "
+            "loggato, la sessione viene salvata e non servira' ripeterlo."
+        ) from None
 
 
 def _esegui_login(page: Page, site: str, tentativi_rimasti: int = 2) -> None:
@@ -65,43 +139,88 @@ def _esegui_login(page: Page, site: str, tentativi_rimasti: int = 2) -> None:
 
     page.fill("#user_login", os.environ["WP_ADMIN_USER"])
     page.fill("#user_pass", os.environ["WP_ADMIN_PASSWORD"])
+    page.check("#rememberme")  # cookie di lunga durata: meno login futuri
+    _risolvi_sfida_nel_form(page)
+    _completa_recaptcha(page)
     page.click("#wp-submit")
     # wp-admin esegue polling continuo (Heartbeat API): "networkidle" non si
     # risolve mai li', quindi si aspetta un elemento concreto della pagina di
     # destinazione (login riuscito, messaggio di errore, o la sfida antibot).
-    page.wait_for_selector("#wpadminbar, #login_error, body")
+    # Niente "body" tra le alternative: esiste gia' nella pagina di login che
+    # si sta lasciando, e farebbe leggere l'esito prima che il POST finisca.
+    esito = (
+        page.locator("#wpadminbar")
+        .or_(page.locator("#login_error"))
+        .or_(page.get_by_text("problema di matematica"))
+    )
+    esito.first.wait_for(timeout=30000)
 
     if _risolvi_sfida_antibot(page) and tentativi_rimasti > 0:
         _esegui_login(page, site, tentativi_rimasti - 1)
+        return
+
+    if page.locator("#login_error").count():
+        raise RuntimeError(f"Login wp-admin rifiutato: {page.inner_text('#login_error').strip()}")
+
+
+def _sessione_valida(context: BrowserContext, site: str) -> bool:
+    """Controlla con una richiesta HTTP leggera (stessi cookie del browser, senza
+    navigare) se la sessione wp-admin e' ancora viva: da loggati /wp-admin/
+    risponde 200 con la admin bar, altrimenti redirige a wp-login.php."""
+    try:
+        risposta = context.request.get(f"{site}/wp-admin/", max_redirects=0, timeout=15000)
+    except PlaywrightError:
+        return False
+    return risposta.status == 200 and 'id="wpadminbar"' in risposta.text()
+
+
+def _salva_sessione(context: BrowserContext) -> None:
+    STATE_FILE.parent.mkdir(mode=0o700, exist_ok=True)
+    context.storage_state(path=str(STATE_FILE))
+    STATE_FILE.chmod(0o600)
+
+
+def _assicura_login(page: Page, site: str) -> None:
+    """Se la sessione corrente e' scaduta rifa' il login e la salva su disco."""
+    if _sessione_valida(page.context, site):
+        return
+
+    _esegui_login(page, site)
+    if not _sessione_valida(page.context, site):
+        raise RuntimeError(
+            "Login wp-admin fallito: controlla WP_ADMIN_USER/WP_ADMIN_PASSWORD in .env"
+        )
+    _salva_sessione(page.context)
 
 
 def _get_logged_in_page() -> Page:
-    """Riusa la pagina già loggata se c'è, altrimenti avvia browser + login."""
+    """Riusa la pagina già loggata se c'è (rifacendo il login solo se la sessione
+    e' scaduta), altrimenti avvia browser, ripristina i cookie salvati e logga
+    solo se non bastano."""
     global _playwright, _browser, _page
 
+    site = os.environ["WP_SITE_URL"]
+
     if _page is not None and not _page.is_closed():
+        _assicura_login(_page, site)
         return _page
 
-    site = os.environ["WP_SITE_URL"]
     _playwright = _playwright or sync_playwright().start()
     # headless=False: la build Chromium "fallback" che Playwright scarica su
     # questo host (OS non ufficialmente supportato) calcola male la posizione
     # di alcuni elementi della sidebar di wp-admin in modalita' headless
     # ("outside of viewport" anche se visibili); in modalita' headed il
     # rendering e' corretto e i click nativi funzionano senza trucchi via JS.
+    # Serve anche per il reCAPTCHA: l'utente deve poterlo vedere e spuntare.
     _browser = _browser or _playwright.chromium.launch(headless=False)
     context = _browser.new_context(
-        ignore_https_errors=True, viewport={"width": 1600, "height": 1200}
+        ignore_https_errors=True,
+        viewport={"width": 1600, "height": 1200},
+        storage_state=str(STATE_FILE) if STATE_FILE.exists() else None,
     )
     _page = context.new_page()
 
-    _esegui_login(_page, site)
-
-    if "wp-login.php" in _page.url:
-        raise RuntimeError(
-            "Login wp-admin fallito: controlla WP_ADMIN_USER/WP_ADMIN_PASSWORD in .env"
-        )
-
+    _assicura_login(_page, site)
     return _page
 
 
