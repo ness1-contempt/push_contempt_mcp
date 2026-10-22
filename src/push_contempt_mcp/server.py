@@ -19,6 +19,7 @@ from push_contempt_mcp import (
     cache_tools,
     catalog_health,
     inventory_tools,
+    order_tools,
     pricing_tools,
     product_sync,
     product_tools,
@@ -270,6 +271,46 @@ def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str)
     """
     risultato = browser_tools.aggiorna_seo_categoria(term_id, titolo_seo, meta_description)
     return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def lista_ordini(
+    stato: str = "",
+    ultime_ore: int | None = None,
+    piu_vecchi_di_ore: int | None = None,
+    da: str | None = None,
+    a: str | None = None,
+    ordina: str = "desc",
+    limite: int = 50,
+) -> dict:
+    """Elenco ordini WooCommerce, filtrabile per stato e finestra temporale.
+
+    `stato`: uno o piu' stati WooCommerce separati da virgola, con lo slug
+    nativo (non esiste uno stato "evaso"): pending (in attesa di pagamento),
+    processing (in lavorazione), on-hold (in sospeso), completed
+    (completato), cancelled, refunded, failed. Vuoto = tutti gli stati.
+    `ultime_ore`: solo ordini creati nelle ultime N ore (24 = ultima giornata).
+    `piu_vecchi_di_ore`: solo ordini creati da piu' di N ore.
+    `da`/`a`: estremi (YYYY-MM-DD o YYYY-MM-DDTHH:MM, fuso del sito); `a` con la
+    sola data include tutta la giornata. I filtri di data si combinano
+    (intersezione). `ordina`: "desc" (piu' recenti prima) o "asc".
+
+    Restituisce totale_trovati (anche oltre `limite`, massimo 200) e, per ogni
+    ordine, numero, stato, data, totale, pagamento, citta' e prodotti: nessun
+    dato personale oltre alla citta'. Per i dettagli di un ordine usa
+    dettaglio_ordine.
+    """
+    return order_tools.lista_ordini(stato, ultime_ore, piu_vecchi_di_ore, da, a, ordina, limite)
+
+
+@mcp.tool()
+def dettaglio_ordine(ordine_id: int) -> dict:
+    """Dettaglio completo di un ordine: righe con id prodotto, importi (subtotale,
+    sconto, spedizione, tasse), date di pagamento e completamento, metodo di
+    spedizione, nota del cliente e DATI PERSONALI del cliente (nome, email,
+    telefono, indirizzi). Usalo solo quando serve davvero.
+    """
+    return order_tools.dettaglio_ordine(ordine_id)
 
 
 @mcp.tool()

@@ -52,6 +52,16 @@ Copia `.env.example` in `.env` e compila:
 - `prodotti_sotto_scorta` — prodotti esauriti o sotto una soglia di scorte.
 - `report_vendite_prodotti` — più venduti e mai venduti in un periodo.
 
+**Ordini** (sola lettura, richiedono il plugin ≥ della versione che include
+`/ordini`)
+- `lista_ordini` — ordini filtrabili per stato WooCommerce (`pending`,
+  `processing`, `on-hold`, `completed`, `cancelled`, `refunded`, `failed`; non
+  esiste uno stato "evaso") e per finestra temporale (`ultime_ore`,
+  `piu_vecchi_di_ore`, `da`/`a`). L'elenco non contiene dati personali oltre
+  alla città di spedizione.
+- `dettaglio_ordine` — un singolo ordine con righe, importi, date e dati del
+  cliente (nome, email, telefono, indirizzi).
+
 **Creazione prodotti**
 - `scansiona_cartella_prodotti` — confronta una cartella locale
   (`<Categoria>/<Prodotto>/`, foto + `.txt`) con il catalogo, separa i
@@ -107,6 +117,7 @@ Copia `.env.example` in `.env` e compila:
 - `src/push_contempt_mcp/product_tools.py` — creazione prodotto: client REST + upload immagini su `/wp/v2/media`
 - `src/push_contempt_mcp/pricing_tools.py` — aggiornamento prezzi in blocco: client REST
 - `src/push_contempt_mcp/inventory_tools.py` — scorte: client REST
+- `src/push_contempt_mcp/order_tools.py` — ordini: client REST
 - `src/push_contempt_mcp/sales_tools.py` — report vendite: client REST
 - `src/push_contempt_mcp/catalog_health.py` — salute catalogo: client REST
 - `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast: client REST
