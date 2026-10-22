@@ -22,8 +22,10 @@ def _auth() -> tuple[str, str]:
 
 
 def lista_stato_seo_prodotti() -> list[dict]:
-    """Vista d'insieme: per ogni prodotto pubblicato, titolo SEO/meta description
-    impostati o mancanti, e le loro lunghezze (utile per capire dove intervenire).
+    """Vista d'insieme: per ogni prodotto pubblicato o in bozza, titolo SEO/meta
+    description impostati o mancanti, le loro lunghezze, stato e data di
+    creazione (utile per capire dove intervenire, e per distinguere i
+    prodotti appena inseriti da quelli del catalogo consolidato).
     """
     site = os.environ["WP_SITE_URL"]
     risposta = requests.get(

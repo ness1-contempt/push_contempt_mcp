@@ -212,9 +212,11 @@ def applica_aggiornamento_prezzi(aggiornamenti: list[dict]) -> dict:
 
 @mcp.tool()
 def lista_stato_seo_prodotti() -> list[dict]:
-    """Vista d'insieme SEO su tutti i prodotti pubblicati: titolo SEO e meta
-    description impostati o mancanti, con le rispettive lunghezze. Utile per
-    capire da dove iniziare un'ottimizzazione SEO del catalogo.
+    """Vista d'insieme SEO su tutti i prodotti pubblicati o in bozza: titolo SEO
+    e meta description impostati o mancanti, con le rispettive lunghezze, stato
+    e data di creazione. Utile per capire da dove iniziare un'ottimizzazione
+    SEO del catalogo, distinguendo i prodotti appena inseriti da quelli del
+    catalogo consolidato.
     """
     return seo_tools.lista_stato_seo_prodotti()
 
