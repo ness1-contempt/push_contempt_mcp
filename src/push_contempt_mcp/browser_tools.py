@@ -12,6 +12,7 @@ funzione sincrona, eseguita dall'SDK in un thread separato.
 """
 
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -205,3 +206,64 @@ def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str)
         "titolo_seo": titolo_seo,
         "meta_description": meta_description,
     }
+
+
+_INTESTAZIONE_CATEGORIA = re.compile(r"^(Problemi|Miglioramenti|Risultati buoni) \(\d+\)$")
+_NOME_CHIAVE_CATEGORIA = {
+    "Problemi": "problemi",
+    "Miglioramenti": "miglioramenti",
+    "Risultati buoni": "risultati_buoni",
+}
+
+
+def _analisi_seo_da_testo(blocco: str) -> dict:
+    """Divide il testo grezzo del pannello "Risultati dell'analisi" di Yoast
+    nelle sue tre categorie. Il blocco e' una sequenza di paragrafi separati
+    da riga vuota: un'intestazione ("Problemi (1)") seguita dai paragrafi di
+    quella categoria, fino alla prossima intestazione. L'ultima riga di ogni
+    paragrafo e' quella controllata, cosi' la primissima intestazione (che
+    nel testo e' preceduta da "Risultati dell'analisi\\n" sulla stessa riga
+    di paragrafo) viene riconosciuta comunque.
+    """
+    sezioni: dict = {"problemi": [], "miglioramenti": [], "risultati_buoni": []}
+    categoria_corrente = None
+
+    for paragrafo in blocco.split("\n\n"):
+        paragrafo = paragrafo.strip()
+        if not paragrafo:
+            continue
+        corrispondenza = _INTESTAZIONE_CATEGORIA.match(paragrafo.splitlines()[-1])
+        if corrispondenza:
+            categoria_corrente = _NOME_CHIAVE_CATEGORIA[corrispondenza.group(1)]
+            continue
+        if categoria_corrente:
+            sezioni[categoria_corrente].append(paragrafo)
+
+    return sezioni
+
+
+def leggi_analisi_seo_yoast(prodotto_id: int) -> dict:
+    """Apre il prodotto in wp-admin e legge il verdetto REALE di Yoast
+    (problemi/miglioramenti/risultati buoni), non la nostra approssimazione
+    in seo_tools.valida_contenuto_seo: Yoast calcola la sua analisi in JS
+    lato client nell'editor, non c'e' una REST API che dia lo stesso
+    dettaglio, quindi serve leggerla da li'.
+    """
+    site = os.environ["WP_SITE_URL"]
+    page = _get_logged_in_page()
+    url = f"{site}/wp-admin/post.php?post={prodotto_id}&action=edit"
+    page.goto(url, wait_until="domcontentloaded")
+    page.wait_for_selector("#wpseo-metabox-root")
+
+    risultati = page.get_by_text("Risultati dell'analisi", exact=False).first
+    page.wait_for_timeout(1500)  # Yoast calcola l'analisi in modo asincrono dopo il mount
+    if not risultati.is_visible():
+        page.get_by_text("Analisi SEO", exact=False).first.click()
+    risultati.wait_for(timeout=15000)
+
+    testo = page.inner_text("#wpseo-metabox-root")
+    inizio = testo.find("Risultati dell'analisi")
+    fine = testo.find("Aggiungi una frase chiave correlata")
+    blocco = testo[inizio : fine if fine != -1 else None]
+
+    return {"prodotto_id": prodotto_id, **_analisi_seo_da_testo(blocco)}

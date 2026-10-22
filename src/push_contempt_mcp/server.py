@@ -249,6 +249,17 @@ def aggiorna_seo_prodotto(
 
 
 @mcp.tool()
+def leggi_analisi_seo_yoast(prodotto_id: int) -> dict:
+    """Legge il verdetto REALE di Yoast per un prodotto (problemi, miglioramenti,
+    risultati buoni), cosi' come appare nell'editor di wp-admin - non
+    un'approssimazione: e' l'analisi calcolata da Yoast stesso. Usalo dopo
+    aggiorna_seo_prodotto per sapere se manca ancora qualcosa (es. un link in
+    uscita, lunghezza minima del testo) prima di considerare chiuso il lavoro.
+    """
+    return browser_tools.leggi_analisi_seo_yoast(prodotto_id)
+
+
+@mcp.tool()
 def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str) -> dict:
     """Scrive titolo SEO e meta description di una categoria prodotto, via wp-admin.
 
