@@ -88,3 +88,73 @@ def test_analisi_seo_da_testo_categoria_assente_resta_vuota():
     assert sezioni["problemi"] == []
     assert sezioni["miglioramenti"] == []
     assert sezioni["risultati_buoni"] == ["Tutto ok: ottimo lavoro!"]
+
+
+class _LocatorFinto:
+    def __init__(self, pagina, chiamate_attese):
+        self._pagina = pagina
+        self._chiamate_attese = chiamate_attese
+
+    @property
+    def first(self):
+        return self
+
+    def fill(self, valore):
+        self._pagina.compilato = valore
+
+    def click(self):
+        self._pagina.cliccato = True
+
+
+class _PaginaFinta:
+    """Fake minimale di Page, solo per _risolvi_sfida_antibot: espone
+    inner_text/locator/get_by_role/wait_for_load_state con lo stesso
+    contratto usato dal codice, senza bisogno di un browser reale."""
+
+    def __init__(self, testo):
+        self._testo = testo
+        self.compilato = None
+        self.cliccato = False
+        self.attesa_caricamento = False
+
+    def inner_text(self, _selettore):
+        return self._testo
+
+    def locator(self, _selettore):
+        return _LocatorFinto(self, None)
+
+    def get_by_role(self, _ruolo, name=None):
+        assert name.search("Continua")
+        return _LocatorFinto(self, None)
+
+    def wait_for_load_state(self, *_a, **_k):
+        self.attesa_caricamento = True
+
+
+def test_risolvi_sfida_antibot_assente_non_tocca_la_pagina():
+    pagina = _PaginaFinta("Bentornato in wp-admin.")
+
+    assert browser_tools._risolvi_sfida_antibot(pagina) is False
+    assert pagina.compilato is None
+    assert pagina.cliccato is False
+
+
+def test_risolvi_sfida_antibot_risolve_addizione():
+    pagina = _PaginaFinta(
+        "Risolvi questo problema di matematica per dimostrare che non sei un bot.\n7 + 2 ="
+    )
+
+    assert browser_tools._risolvi_sfida_antibot(pagina) is True
+    assert pagina.compilato == "9"
+    assert pagina.cliccato is True
+    assert pagina.attesa_caricamento is True
+
+
+def test_risolvi_sfida_antibot_risolve_sottrazione_e_moltiplicazione():
+    for testo, atteso in [
+        ("problema di matematica\n9 - 4 =", "5"),
+        ("problema di matematica\n6 x 3 =", "18"),
+    ]:
+        pagina = _PaginaFinta(testo)
+        assert browser_tools._risolvi_sfida_antibot(pagina) is True
+        assert pagina.compilato == atteso

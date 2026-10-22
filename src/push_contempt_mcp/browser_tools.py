@@ -29,6 +29,51 @@ _playwright = None
 _browser = None
 _page: Page | None = None
 
+_PATTERN_SFIDA_MATEMATICA = re.compile(r"(\d+)\s*([+\-×x*])\s*(\d+)\s*=")
+
+
+def _risolvi_sfida_antibot(page: Page) -> bool:
+    """Altervista a volte interpone, al posto del login, una sfida tipo
+    "Risolvi questo problema di matematica per dimostrare che non sei un
+    bot": e' testo semplice nella pagina (non un'immagine), quindi si legge
+    e si risolve senza bisogno di uno screenshot. Dopo averla risolta
+    bisogna rifare il login da capo (e' la pagina stessa a dirlo).
+    Ritorna True se la sfida c'era ed e' stata gestita.
+    """
+    testo = page.inner_text("body")
+    if "problema di matematica" not in testo:
+        return False
+
+    corrispondenza = _PATTERN_SFIDA_MATEMATICA.search(testo)
+    if not corrispondenza:
+        return False
+
+    a, operatore, b = corrispondenza.groups()
+    a, b = int(a), int(b)
+    risultato = {"+": a + b, "-": a - b}.get(operatore, a * b)
+
+    page.locator("input[type=text], input[type=number]").first.fill(str(risultato))
+    page.get_by_role("button", name=re.compile("Continua")).click()
+    page.wait_for_load_state("domcontentloaded")
+    return True
+
+
+def _esegui_login(page: Page, site: str, tentativi_rimasti: int = 2) -> None:
+    page.goto(f"{site}/wp-login.php", wait_until="domcontentloaded")
+    if _risolvi_sfida_antibot(page):
+        page.goto(f"{site}/wp-login.php", wait_until="domcontentloaded")
+
+    page.fill("#user_login", os.environ["WP_ADMIN_USER"])
+    page.fill("#user_pass", os.environ["WP_ADMIN_PASSWORD"])
+    page.click("#wp-submit")
+    # wp-admin esegue polling continuo (Heartbeat API): "networkidle" non si
+    # risolve mai li', quindi si aspetta un elemento concreto della pagina di
+    # destinazione (login riuscito, messaggio di errore, o la sfida antibot).
+    page.wait_for_selector("#wpadminbar, #login_error, body")
+
+    if _risolvi_sfida_antibot(page) and tentativi_rimasti > 0:
+        _esegui_login(page, site, tentativi_rimasti - 1)
+
 
 def _get_logged_in_page() -> Page:
     """Riusa la pagina già loggata se c'è, altrimenti avvia browser + login."""
@@ -50,14 +95,7 @@ def _get_logged_in_page() -> Page:
     )
     _page = context.new_page()
 
-    _page.goto(f"{site}/wp-login.php", wait_until="domcontentloaded")
-    _page.fill("#user_login", os.environ["WP_ADMIN_USER"])
-    _page.fill("#user_pass", os.environ["WP_ADMIN_PASSWORD"])
-    _page.click("#wp-submit")
-    # wp-admin esegue polling continuo (Heartbeat API): "networkidle" non si
-    # risolve mai li', quindi si aspetta un elemento concreto della pagina di
-    # destinazione (login riuscito o messaggio di errore).
-    _page.wait_for_selector("#wpadminbar, #login_error")
+    _esegui_login(_page, site)
 
     if "wp-login.php" in _page.url:
         raise RuntimeError(
