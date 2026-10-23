@@ -106,7 +106,8 @@ Copia `.env.example` in `.env` e compila:
   l'assistente giudica intenzione e tono. Le formule ripetute su tutto il sito
   (spedizioni, resi, "aggiungi al carrello") sono separate dai contenuti. Gira
   sul tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
-  richieste. Metodi, dal più leggero: HTTP; se la home risponde 403/429 o è
+  richieste. Se l'indirizzo punta a una sezione (es. `https://sito.it/telefonia/`)
+  l'analisi resta dentro quella sezione (`perimetro`). Metodi, dal più leggero: HTTP; se la home risponde 403/429 o è
   costruita con JavaScript e il browser è attivo (`SEO_ANALISI_USA_BROWSER=1` o
   `usa_browser`), dopo aver aspettato il `Retry-After` si passa a un Chromium vero in
   locale; se non basta, `analizza_pagine_salvate`. Il report dice il `metodo` usato.

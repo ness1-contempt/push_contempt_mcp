@@ -1309,3 +1309,102 @@ def test_le_voci_dei_menu_a_tendina_non_si_incollano():
         "Giallo",
         "Un telefono ricondizionato.",
     ]
+
+
+# --- analisi di una sola sezione del sito -----------------------------------
+
+
+def test_perimetro_dal_percorso_dell_indirizzo():
+    assert competitor_seo._perimetro("https://esempio.it/") == ""
+    assert competitor_seo._perimetro("https://esempio.it") == ""
+    assert competitor_seo._perimetro("https://esempio.it/Telefonia/") == "/telefonia"
+    assert competitor_seo._nel_perimetro("https://esempio.it/telefonia/smartphone/x", "/telefonia")
+    assert competitor_seo._nel_perimetro("https://esempio.it/telefonia", "/telefonia")
+    assert not competitor_seo._nel_perimetro("https://esempio.it/telefonia-fissa/x", "/telefonia")
+    assert not competitor_seo._nel_perimetro("https://esempio.it/tv/x", "/telefonia")
+    assert competitor_seo._nel_perimetro("https://esempio.it/tv/x", "")
+
+
+def _sito_con_sezioni():
+    base = "https://esempio.it"
+    prodotti = [f"{base}/prodotto/telefonia-{i}/" for i in range(1, 7)]
+    prodotti += [f"{base}/telefonia/prodotto/smartphone-{i}/" for i in range(1, 9)]
+    prodotti += [f"{base}/tv/prodotto/televisore-{i}/" for i in range(1, 9)]
+    categorie = [f"{base}/telefonia/categoria-prodotto/{c}/" for c in ("android", "ios")]
+    categorie += [f"{base}/tv/categoria-prodotto/{c}/" for c in ("oled", "led")]
+    indice = (
+        f"<sitemapindex><sitemap><loc>{base}/product-sitemap.xml</loc></sitemap>"
+        f"<sitemap><loc>{base}/product_cat-sitemap.xml</loc></sitemap></sitemapindex>"
+    )
+
+    def mappa(urls):
+        return "<urlset>" + "".join(f"<url><loc>{u}</loc></url>" for u in urls) + "</urlset>"
+
+    sito = {
+        f"{base}/sitemap.xml": (200, indice),
+        f"{base}/product-sitemap.xml": (200, mappa(prodotti)),
+        f"{base}/product_cat-sitemap.xml": (200, mappa(categorie)),
+        f"{base}/": (200, _pagina_html("Home", "Il negozio", schema="WebSite")),
+        f"{base}/telefonia/": (200, _pagina_html("Telefonia", "Telefonia e accessori")),
+    }
+    for url in prodotti + categorie:
+        sito[url] = (200, _pagina_html(url.rsplit("/", 2)[1], url.rsplit("/", 2)[1]))
+    return sito
+
+
+def test_indirizzo_di_una_sezione_limita_il_campione_a_quella_sezione(monkeypatch):
+    richieste = _sito_finto(monkeypatch, _sito_con_sezioni())
+
+    report = analizza_seo_sito("https://esempio.it/telefonia/")
+
+    assert report["perimetro"] == "/telefonia"
+    assert report["sitemap"]["url_trovati"] == {"categorie": 2, "prodotti": 8}
+    pagine = [p["url"] for p in report["pagine"]]
+    assert pagine[0] == "https://esempio.it/telefonia/"
+    assert all("/telefonia/" in u for u in pagine)
+    assert not any("/tv/" in r for r in richieste)  # nemmeno una richiesta fuori sezione
+    assert not any(r.endswith("/prodotto/telefonia-1/") for r in richieste)
+    assert report["campione"]["prodotti"] == 8 and report["campione"]["categorie"] == 2
+
+
+def test_la_pagina_iniziale_di_una_sezione_non_e_una_home(monkeypatch):
+    _sito_finto(monkeypatch, _sito_con_sezioni())
+
+    report = analizza_seo_sito("https://esempio.it/telefonia/")
+
+    assert report["pagine"][0]["tipo"] == "sezione"
+    criteri = [c["criterio"] for c in report["valutazione"]["aree"]["dati_strutturati"]["criteri"]]
+    assert not any("Organization" in c for c in criteri)  # il criterio vale per la home vera
+
+
+def test_senza_sezione_l_analisi_resta_su_tutto_il_sito(monkeypatch):
+    _sito_finto(monkeypatch, _sito_con_sezioni())
+
+    report = analizza_seo_sito("https://esempio.it/")
+
+    assert report["perimetro"] is None
+    assert report["pagine"][0]["tipo"] == "home"
+    assert report["sitemap"]["url_trovati"]["prodotti"] == 22
+
+
+def test_in_una_sezione_senza_sitemap_si_usano_i_link_della_pagina_della_sezione(monkeypatch):
+    base = "https://esempio.it"
+    pagina_sezione = (
+        "<html><head><title>Telefonia | Negozio</title></head><body><h1>Telefonia</h1>"
+        f'<a href="{base}/telefonia/prodotto/uno/">Uno</a>'
+        f'<a href="{base}/telefonia/categoria-prodotto/android/">Android</a>'
+        f'<a href="{base}/tv/prodotto/estraneo/">Estraneo</a></body></html>'
+    )
+    richieste = _sito_finto(
+        monkeypatch,
+        {
+            f"{base}/telefonia/": (200, pagina_sezione),
+            f"{base}/telefonia/prodotto/uno/": (200, _pagina_html("Uno", "Uno")),
+            f"{base}/telefonia/categoria-prodotto/android/": (200, _pagina_html("An", "An")),
+        },
+    )
+
+    report = analizza_seo_sito(f"{base}/telefonia/")
+
+    assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (1, 1)
+    assert not any("/tv/" in r for r in richieste)

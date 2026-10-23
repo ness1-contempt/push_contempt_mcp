@@ -1036,6 +1036,19 @@ def _chiudi_analisi(
     return report
 
 
+def _perimetro(url: str) -> str:
+    """Il percorso dell'indirizzo iniziale se punta a una sezione (es. /telefonia),
+    "" se punta alla radice del sito."""
+    return urlsplit(url).path.lower().rstrip("/")
+
+
+def _nel_perimetro(url: str, perimetro: str) -> bool:
+    if not perimetro:
+        return True
+    percorso = urlsplit(url).path.lower().rstrip("/")
+    return percorso == perimetro or percorso.startswith(perimetro + "/")
+
+
 def _analizza(
     url: str,
     max_categorie: int,
@@ -1046,6 +1059,7 @@ def _analizza(
     ritenta_dopo_429: bool = True,
 ) -> dict:
     url = _normalizza_url(url)
+    perimetro = _perimetro(url)
     scaricatore = _Scaricatore(url, usa_curl, browser, ritenta_dopo_429)
     scaricatore.carica_robots()
 
@@ -1057,13 +1071,22 @@ def _analizza(
     if risposta_home.status != 200:
         raise ErroreAnalisi(f"Pagina iniziale: {_motivo_http(risposta_home.status)}")
     home, link_home = _estrai_pagina(
-        risposta_home.testo, risposta_home.url, "home", scaricatore.host
+        risposta_home.testo,
+        risposta_home.url,
+        "sezione" if perimetro else "home",
+        scaricatore.host,
     )
     pagine = [home]
     avvisi: list[str] = []
     avvisi.extend(_avviso_javascript(home))
 
     trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
+    if perimetro:
+        # Si analizza solo la sezione indicata: sitemap e link restano dentro il suo percorso.
+        trovati = {t: [u for u in v if _nel_perimetro(u, perimetro)] for t, v in trovati.items()}
+        altri = [u for u in altri if _nel_perimetro(u, perimetro)]
+        link_home = [u for u in link_home if _nel_perimetro(u, perimetro)]
+        altri += [u for u in link_home if not _tipo_da_percorso(u) and u not in altri]
     if sitemap is None:
         avvisi.append(
             "Nessuna sitemap trovata: le pagine di esempio sono scelte dai link della home."
@@ -1115,9 +1138,11 @@ def _analizza(
         avvisi.append(
             "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
         )
-    return _chiudi_analisi(
+    report = _chiudi_analisi(
         scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, max_caratteri
     )
+    report["perimetro"] = perimetro or None
+    return report
 
 
 def _sembra_costruito_con_js(report: dict) -> bool:

@@ -299,6 +299,10 @@ def analizza_seo_sito(
     costruisce le pagine cosi' o serve pagine segnaposto, lo dice negli `avvisi`.
     Rifiuta indirizzi di reti private.
 
+    `url` puo' essere l'indirizzo del sito o di una sua SEZIONE (es.
+    https://www.euronics.it/telefonia/): in quel caso sitemap e link restano dentro
+    quella sezione e il report indica il `perimetro`. Utile per i grandi cataloghi.
+
     COME USARLO: dal report ricava tu l'intenzione (informativa, comparativa,
     d'acquisto), il tono, cosa il sito enfatizza e come struttura le descrizioni,
     quali termini e misure usa per la categoria. Poi scrivi testi ORIGINALI per
