@@ -53,6 +53,10 @@ PAUSA_SECONDI = 1.0
 PAUSA_MASSIMA_SECONDI = 10.0
 TIMEOUT_SECONDI = 10
 MAX_BYTE = 1_500_000
+# Le sitemap sono molto piu' grandi delle pagine (il protocollo ammette 50 MB per file):
+# con il tetto delle pagine se ne leggerebbe solo l'inizio, e il campione sarebbe
+# sbilanciato verso i primi gruppi dell'elenco.
+MAX_BYTE_SITEMAP = 50_000_000
 MAX_REDIRECT = 3
 MAX_SITEMAP_FIGLIE = 2
 RETRY_AFTER_MASSIMO_SECONDI = 120
@@ -130,6 +134,12 @@ def _controlla_destinazione(url: str) -> None:
             )
 
 
+def _limite_byte(url: str) -> int:
+    """Tetto alla dimensione della risposta: piu' alto per sitemap e robots.txt."""
+    percorso = urlsplit(url).path.lower()
+    return MAX_BYTE_SITEMAP if "sitemap" in percorso or percorso.endswith(".xml") else MAX_BYTE
+
+
 def _decodifica(dati: bytes, codifica: str | None) -> str:
     try:
         return dati.decode(codifica or "utf-8", errors="replace")
@@ -154,13 +164,16 @@ def _richiesta_requests(url: str) -> tuple[int, dict[str, str], bytes, str | Non
     except requests.RequestException as errore:
         raise ErroreAnalisi(f"{url}: {errore.__class__.__name__}") from errore
     try:
-        dati = b""
-        for blocco in risposta.iter_content(65536):
-            dati += blocco
-            if len(dati) > MAX_BYTE:
+        limite = _limite_byte(url)
+        pezzi: list[bytes] = []
+        letti = 0
+        for blocco in risposta.iter_content(262144):
+            pezzi.append(blocco)
+            letti += len(blocco)
+            if letti > limite:
                 break
         intestazioni = {k.lower(): v for k, v in risposta.headers.items()}
-        return risposta.status_code, intestazioni, dati[:MAX_BYTE], risposta.encoding
+        return risposta.status_code, intestazioni, b"".join(pezzi)[:limite], risposta.encoding
     finally:
         risposta.close()
 
@@ -183,7 +196,7 @@ def _separa_risposta_curl(grezzo: bytes) -> tuple[int, dict[str, str], bytes, st
     return (
         int(stato.group(1)),
         intestazioni,
-        corpo[:MAX_BYTE],
+        corpo,
         codifica.group(1) if codifica else None,
     )
 
@@ -207,7 +220,7 @@ def _richiesta_curl(url: str) -> tuple[int, dict[str, str], bytes, str | None]:
     ]
     try:
         with subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as processo:
-            grezzo = processo.stdout.read(MAX_BYTE + 65536)
+            grezzo = processo.stdout.read(_limite_byte(url) + 65536)
             processo.kill()  # se il corpo e' piu' grande del tetto, non serve il resto
             processo.wait()
             errore = processo.stderr.read().decode("utf-8", errors="replace").strip()
@@ -309,7 +322,7 @@ class _Browser:
             return _Risposta(
                 risposta.status,
                 self._pagina.url,
-                testo[:MAX_BYTE],
+                testo[: _limite_byte(url)],
                 float(attesa) if attesa.isdigit() else None,
             )
         except ErroreAnalisi:
@@ -1049,6 +1062,22 @@ def _nel_perimetro(url: str, perimetro: str) -> bool:
     return percorso == perimetro or percorso.startswith(perimetro + "/")
 
 
+def _composizione(pagine: list[dict], perimetro: str) -> dict[str, dict[str, int]]:
+    """Da dove vengono le pagine del campione: per ogni tipo, quante stanno in ciascun
+    sottogruppo (il primo tratto del percorso dopo il perimetro). Mostra subito se il
+    campione e' sbilanciato (es. quasi tutti accessori)."""
+    saltare = len([x for x in perimetro.split("/") if x])
+    composizione: dict[str, dict[str, int]] = {}
+    for pagina in pagine:
+        if pagina["tipo"] not in ("categoria", "prodotto"):
+            continue
+        segmenti = [x for x in urlsplit(pagina["url"]).path.split("/") if x][saltare:]
+        gruppo = segmenti[0] if len(segmenti) > 1 else "(radice)"
+        tipo = composizione.setdefault(pagina["tipo"], {})
+        tipo[gruppo] = tipo.get(gruppo, 0) + 1
+    return composizione
+
+
 def _analizza(
     url: str,
     max_categorie: int,
@@ -1138,10 +1167,17 @@ def _analizza(
         avvisi.append(
             "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
         )
+    non_trovate = sum(s["motivo"].startswith("HTTP 404") for s in saltate)
+    if non_trovate:
+        avvisi.append(
+            f"{non_trovate} indirizzi della sitemap su {len(campione)} campionati rispondono 404: "
+            "la sitemap non e' aggiornata."
+        )
     report = _chiudi_analisi(
         scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, max_caratteri
     )
     report["perimetro"] = perimetro or None
+    report["campione"]["composizione"] = _composizione(pagine, perimetro)
     return report
 
 

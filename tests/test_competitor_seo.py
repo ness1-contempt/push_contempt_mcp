@@ -1408,3 +1408,79 @@ def test_in_una_sezione_senza_sitemap_si_usano_i_link_della_pagina_della_sezione
 
     assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (1, 1)
     assert not any("/tv/" in r for r in richieste)
+
+
+# --- sitemap grandi, composizione del campione, indirizzi 404 ---------------
+
+
+def test_le_sitemap_hanno_un_tetto_molto_piu_alto_delle_pagine(monkeypatch):
+    _pubblico(monkeypatch)
+    enorme = b"a" * (competitor_seo.MAX_BYTE * 3)
+    monkeypatch.setattr(requests, "get", lambda url, **kw: _RispostaHttpFinta(200, corpo=enorme))
+
+    pagina = _scarica_grezzo("https://esempio.it/", "esempio.it")
+    mappa = _scarica_grezzo("https://esempio.it/sitemap_0-product.xml", "esempio.it")
+    robots_xml = _scarica_grezzo("https://esempio.it/prodotti.xml", "esempio.it")
+
+    assert len(pagina.testo) == competitor_seo.MAX_BYTE
+    assert len(mappa.testo) == len(enorme) < competitor_seo.MAX_BYTE_SITEMAP
+    assert len(robots_xml.testo) == len(enorme)
+
+
+def test_una_sitemap_grande_non_viene_letta_solo_all_inizio(monkeypatch):
+    """Il difetto reale (Euronics): con il tetto delle pagine il campione veniva solo dai
+    primi gruppi della sitemap. Qui i telefoni stanno in fondo a una sitemap da oltre 1,5 MB
+    e il test passa dal vero trasporto, non da un finto sito."""
+    _pubblico(monkeypatch)
+    base = "https://esempio.it"
+    accessori = [f"{base}/telefonia/accessori/cavo-{i}/1{i:06d}.html" for i in range(20000)]
+    telefoni = [f"{base}/telefonia/smartphone/telefono-{i}/2{i:06d}.html" for i in range(60)]
+    mappa = "<urlset>" + "".join(f"<url><loc>{u}</loc></url>" for u in accessori + telefoni)
+    mappa = (mappa + "</urlset>").encode()
+    assert len(mappa) > competitor_seo.MAX_BYTE  # piu' grande del tetto delle pagine
+    pagina = _pagina_html("Telefono", "Telefono").encode()
+
+    def get_finto(url, **kwargs):
+        if url.endswith("/robots.txt"):
+            return _RispostaHttpFinta(404, corpo=b"")
+        if url.endswith("/sitemap.xml"):
+            return _RispostaHttpFinta(200, corpo=mappa)
+        return _RispostaHttpFinta(200, corpo=pagina)
+
+    monkeypatch.setattr(requests, "get", get_finto)
+
+    report = analizza_seo_sito(f"{base}/telefonia/smartphone/", max_prodotti=10)
+
+    assert report["sitemap"]["url_trovati"]["prodotti"] == 60  # letta tutta, non solo l'inizio
+    assert report["campione"]["prodotti"] == 10
+    prodotti = [p["url"] for p in report["pagine"] if p["tipo"] == "prodotto"]
+    assert len(prodotti) == 10 and all("/smartphone/" in u for u in prodotti)
+
+
+def test_composizione_del_campione_per_sottogruppo():
+    pagine = [
+        {"tipo": "sezione", "url": "https://esempio.it/telefonia/"},
+        {"tipo": "categoria", "url": "https://esempio.it/telefonia/accessori/"},
+        {"tipo": "prodotto", "url": "https://esempio.it/telefonia/accessori/cavi/cavo-1.html"},
+        {"tipo": "prodotto", "url": "https://esempio.it/telefonia/accessori/cavi/cavo-2.html"},
+        {"tipo": "prodotto", "url": "https://esempio.it/telefonia/smartphone/uno.html"},
+        {"tipo": "prodotto", "url": "https://esempio.it/telefonia/fisso.html"},
+    ]
+    assert competitor_seo._composizione(pagine, "/telefonia") == {
+        "categoria": {"(radice)": 1},
+        "prodotto": {"accessori": 2, "smartphone": 1, "(radice)": 1},
+    }
+    # senza perimetro il gruppo e' il primo tratto del percorso
+    assert competitor_seo._composizione(pagine[2:3], "") == {"prodotto": {"telefonia": 1}}
+
+
+def test_il_report_mostra_la_composizione_e_segnala_gli_indirizzi_404(monkeypatch):
+    sito = _negozio_finto()
+    sito["https://esempio.it/prodotto/telefono-7/"] = (404, "")
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert report["campione"]["composizione"]["prodotto"] == {"prodotto": 8}
+    assert any("rispondono 404" in a and "sitemap non e' aggiornata" in a for a in report["avvisi"])
+    assert any(s["motivo"] == "HTTP 404" for s in report["campione"]["pagine_saltate"])
