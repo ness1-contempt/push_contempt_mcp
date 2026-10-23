@@ -208,3 +208,15 @@ def test_analizza_testi_arricchisce_le_pagine_e_consuma_i_blocchi():
     assert list(risultato["per_tipo"]) == ["prodotto"]  # niente "home" ne' tipi senza pagine
     termini = [t["termine"] for t in risultato["per_tipo"]["prodotto"]["vocabolario"]["termini"]]
     assert "batteria" in termini and "spedizione" not in termini and "cookie" not in termini
+
+
+def test_i_campi_della_scheda_non_sono_template_anche_se_si_ripetono():
+    pagine = [
+        [SPEDIZIONE, "CONDIZIONI: 9/10", "BRAND: Vintage", "Filtra:", f"TAGLIA: {i}"]
+        for i in range(6)
+    ]
+    ripetuti = blocchi_ripetuti(pagine)
+    assert SPEDIZIONE.lower() in ripetuti  # una frase ripetuta resta template
+    assert "filtra:" in ripetuti  # etichetta senza valore: e' un comando dell'interfaccia
+    assert "condizioni: 9/10" not in ripetuti  # etichetta: valore = contenuto
+    assert "brand: vintage" not in ripetuti

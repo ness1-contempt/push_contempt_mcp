@@ -89,6 +89,15 @@ def _termine_valido(token: str) -> bool:
 # --- template del sito -------------------------------------------------------
 
 
+# "ETICHETTA: valore" (es. "CONDIZIONI: 9/10"): un campo della scheda, anche se il
+# valore si ripete su molti prodotti. Non e' template.
+_RE_ETICHETTA_VALORE = re.compile(r"^[^:]{2,40}:\s*\S.{0,40}$")
+
+
+def _e_campo_della_scheda(blocco: str) -> bool:
+    return len(blocco.split()) <= 8 and bool(_RE_ETICHETTA_VALORE.match(blocco))
+
+
 def blocchi_ripetuti(blocchi_per_pagina: list[list[str]]) -> dict[str, int]:
     """Blocchi di testo identici presenti in almeno meta' delle pagine (e in non
     meno di 3): il template del sito. Con meno di 4 pagine non si decide:
@@ -98,7 +107,7 @@ def blocchi_ripetuti(blocchi_per_pagina: list[list[str]]) -> dict[str, int]:
         return {}
     conteggio: Counter = Counter()
     for blocchi in blocchi_per_pagina:
-        conteggio.update({_norm(b) for b in blocchi})
+        conteggio.update({_norm(b) for b in blocchi if not _e_campo_della_scheda(b)})
     soglia = max(3, math.ceil(len(blocchi_per_pagina) / 2))
     return {blocco: n for blocco, n in conteggio.items() if n >= soglia}
 
