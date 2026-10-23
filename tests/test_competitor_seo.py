@@ -1292,3 +1292,20 @@ def test_con_la_sola_home_il_report_non_da_un_punteggio_complessivo(monkeypatch)
     assert report["valutazione"]["punteggio"] is None
     assert report["valutazione"]["affidabilita"] == "bassa"
     assert report["valutazione"]["aree"]["titoli"]["punteggio"] is not None
+
+
+def test_le_voci_dei_menu_a_tendina_non_si_incollano():
+    html = (
+        "<html><body><h1>iPhone 14</h1>"
+        "<label>Colore</label><select><option>Scegli un'opzione</option><option>Blu</option>"
+        "<option>Giallo</option></select>"
+        "<p>Un <strong>telefono</strong> ricondizionato.</p></body></html>"
+    )
+    pagina, _ = _estrai_pagina(html, "https://esempio.it/p/", "prodotto", "esempio.it")
+    assert pagina["_blocchi"] == [
+        "Colore",
+        "Scegli un'opzione",
+        "Blu",
+        "Giallo",
+        "Un telefono ricondizionato.",
+    ]

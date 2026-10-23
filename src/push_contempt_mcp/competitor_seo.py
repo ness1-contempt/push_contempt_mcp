@@ -399,7 +399,8 @@ class _Estrattore(HTMLParser):
     # il testo dei tag in linea (strong, a, span) resta nello stesso blocco.
     _BLOCCHI = frozenset(
         "p div li ul ol tr td th table br section article main h1 h2 h3 h4 h5 h6 dt dd dl "
-        "blockquote button figcaption form".split()
+        "blockquote button figcaption form option select optgroup label legend summary "
+        "caption fieldset".split()
     )
     _MAX_BLOCCHI = 800
     _MAX_CARATTERI_BLOCCO = 1500
