@@ -109,6 +109,15 @@ Copia `.env.example` in `.env` e compila:
   richieste e non esegue JavaScript. Rifiuta reti private; per provarlo su un
   sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`. Vocabolario ed estratti
   servono ad analizzare: i testi nostri vanno scritti con parole proprie.
+- `controlla_somiglianza` — misura quanto un testo nostro somiglia ai testi di
+  un sito analizzato con `analizza_seo_sito` (salvati in locale dopo ogni
+  analisi) o a testi dati a mano, su una scala da 0 (nessuna somiglianza) a 9
+  (copia). Si basa su sequenze di almeno 5 parole consecutive in comune e
+  restituisce punteggio, significato, passaggi coincidenti e fonti più simili.
+  La `soglia` (0-9) è il massimo che l'utilizzatore accetta: con essa il
+  risultato dice anche se il testo è accettabile. Specifiche tecniche uguali
+  alzano un po' il punteggio anche in testi originali, per questo i passaggi
+  sono elencati e il giudizio finale resta all'utilizzatore.
 
 **Manutenzione**
 - `purga_cache_sito` — invalida manualmente la cache del sito (gli altri
@@ -137,6 +146,7 @@ Copia `.env.example` in `.env` e compila:
 - `src/push_contempt_mcp/catalog_health.py` — salute catalogo: client REST
 - `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast: client REST
 - `src/push_contempt_mcp/competitor_seo.py` — scarico e campione di pagine di un sito concorrente, campi SEO (solo libreria standard + `requests`)
+- `src/push_contempt_mcp/text_similarity.py` — controllo di somiglianza 0-9 fra un nostro testo e quelli analizzati (cache locale dei testi dei concorrenti)
 - `src/push_contempt_mcp/competitor_text.py` — analisi del testo di quelle pagine: template, vocabolario, segnali di stile e intenzione
 - `src/push_contempt_mcp/product_sync.py` — scansione cartella prodotti locale (lettura diretta dal DB, solo confronto nomi)
 - `src/push_contempt_mcp/browser_tools.py` — automazione Playwright per le operazioni ancora manuali (prezzo singolo con anteprima, SEO categoria)

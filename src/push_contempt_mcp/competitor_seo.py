@@ -42,7 +42,7 @@ from urllib.robotparser import RobotFileParser
 
 import requests
 
-from push_contempt_mcp import competitor_text
+from push_contempt_mcp import competitor_text, text_similarity
 
 USER_AGENT_TOKEN = "push_contempt_mcp-seo"
 USER_AGENT = f"{USER_AGENT_TOKEN}/0.1 (+https://github.com/ness1-contempt/push_contempt_mcp)"
@@ -820,9 +820,22 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: in
             "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
         )
     testo = competitor_text.analizza_testi(pagine, max_caratteri)
-    return _costruisci_report(
+    # I testi analizzati restano in locale per controlla_somiglianza.
+    try:
+        text_similarity.salva_corpus(
+            scaricatore.origine,
+            [{**p, "testo": p["_testo_proprio"]} for p in pagine],
+        )
+        confronto = "Testi salvati in locale: usa controlla_somiglianza sui nostri testi."
+    except OSError as errore:
+        confronto = (
+            f"Testi non salvati ({errore.__class__.__name__}): controlla_somiglianza non li avra'."
+        )
+    report = _costruisci_report(
         scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, testo, max_caratteri
     )
+    report["controllo_somiglianza"] = confronto
+    return report
 
 
 def analizza_seo_sito(

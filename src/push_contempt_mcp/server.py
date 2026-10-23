@@ -26,6 +26,7 @@ from push_contempt_mcp import (
     product_tools,
     sales_tools,
     seo_tools,
+    text_similarity,
 )
 
 logger = logging.getLogger(__name__)
@@ -289,14 +290,60 @@ def analizza_seo_sito(
     quali termini e misure usa per la categoria. Poi scrivi testi ORIGINALI per
     i nostri prodotti, con parole tue: gli estratti servono ad analizzare, non
     a riusare. Mai copiare frasi, titoli o description del concorrente, e solo
-    cose vere sui nostri prodotti. I testi vanno poi applicati con i tool SEO
-    (aggiorna_seo_prodotto, crea_prodotto), mostrando prima l'anteprima.
+    cose vere sui nostri prodotti. Prima di applicare i testi con i tool SEO
+    (aggiorna_seo_prodotto, crea_prodotto) passali a controlla_somiglianza e
+    mostra all'utente anche l'anteprima.
 
     `caratteri_per_pagina` e' la lunghezza dell'estratto di ogni pagina (0 =
     nessun estratto, massimo 2000): e' quello che pesa sui token del report.
     `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
+    I testi analizzati restano salvati in locale per controlla_somiglianza.
     """
     return competitor_seo.analizza_seo_sito(url, max_categorie, max_prodotti, caratteri_per_pagina)
+
+
+@mcp.tool()
+def controlla_somiglianza(
+    testo: str,
+    sito: str = "",
+    soglia: int | None = None,
+    riferimenti: list[str] | None = None,
+) -> dict:
+    """Misura quanto un testo NOSTRO somiglia ai testi di un sito analizzato con
+    analizza_seo_sito (o a testi dati a mano), su una scala da 0 a 9: 0 = nessuna
+    somiglianza, 9 = copia. Usalo su ogni testo scritto prendendo spunto da un
+    concorrente (descrizioni, titoli SEO, meta description) PRIMA di applicarlo.
+
+    Come si calcola: sequenze di almeno 5 parole consecutive in comune (maiuscole
+    e punteggiatura ignorate). Il punteggio e' il piu' alto fra la quota di parole
+    del nostro testo coperta da quelle sequenze e la lunghezza della sequenza piu'
+    lunga. Circa: 1-2 coincidenze occasionali, 3-4 qualche frase in comune, 5-6
+    parti ricalcate, 7-8 riscrittura appena ritoccata, 9 copia. Specifiche
+    tecniche e nomi di prodotto uguali alzano un po' il punteggio anche in un
+    testo originale: guarda `passaggi_simili` per distinguere.
+
+    `soglia` (0-9) e' il massimo che l'UTILIZZATORE accetta: chiedigliela, non
+    sceglierla tu; con la soglia il risultato include `accettabile`. Se il testo
+    non la rispetta, riscrivilo con parole tue (cambiando struttura delle frasi,
+    non solo sostituendo qualche parola) e ricontrolla.
+    `sito` limita il confronto a un sito (es. "casualbay.it"); vuoto = tutti quelli
+    analizzati. `riferimenti` aggiunge testi da confrontare a mano.
+    """
+    if soglia is not None and not 0 <= soglia <= 9:
+        return {"errore": "La soglia va da 0 a 9."}
+    confronti = [
+        {"fonte": f"riferimento {i}", "testo": t} for i, t in enumerate(riferimenti or [], 1)
+    ]
+    confronti += text_similarity.carica_riferimenti(sito or None)
+    if not confronti:
+        return {
+            "errore": (
+                "Nessun testo di riferimento: esegui prima analizza_seo_sito"
+                + (f" su {sito}" if sito else "")
+                + " oppure passa dei `riferimenti`."
+            )
+        }
+    return text_similarity.controlla(testo, confronti, soglia)
 
 
 @mcp.tool()

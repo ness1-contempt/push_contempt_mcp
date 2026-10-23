@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-from push_contempt_mcp import competitor_seo
+from push_contempt_mcp import competitor_seo, text_similarity
 from push_contempt_mcp.competitor_seo import (
     ErroreAnalisi,
     _campiona,
@@ -18,9 +18,10 @@ from push_contempt_mcp.competitor_seo import (
 
 
 @pytest.fixture(autouse=True)
-def _senza_pause_e_rete_privata(monkeypatch):
+def _senza_pause_e_rete_privata(monkeypatch, tmp_path):
     monkeypatch.setattr(competitor_seo, "PAUSA_SECONDI", 0)
     monkeypatch.delenv("SEO_ANALISI_CONSENTI_RETE_PRIVATA", raising=False)
+    monkeypatch.setenv("SEO_ANALISI_CACHE_DIR", str(tmp_path / "cache"))  # mai la cache vera
 
 
 # --- rete -------------------------------------------------------------------
@@ -668,3 +669,40 @@ def test_429_a_meta_analisi_ferma_il_campione_e_restituisce_il_parziale(monkeypa
     assert report["campione"]["prodotti"] == 0  # non ha proseguito oltre il 429
     assert report["campione"]["pagine_saltate"][-1]["url"] == cat
     assert not any("/prodotto/" in r for r in richieste)
+
+
+def test_l_analisi_salva_i_testi_per_il_controllo_di_somiglianza(monkeypatch):
+    _sito_finto(monkeypatch, _negozio_finto())
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert "Testi salvati in locale" in report["controllo_somiglianza"]
+    riferimenti = text_similarity.carica_riferimenti("esempio.it")
+    prodotto = next(
+        r for r in riferimenti if r["fonte"] == "https://esempio.it/prodotto/telefono-1/"
+    )
+    assert "descrizione propria con dettagli unici" in prodotto["testo"]
+    assert "Spedizione gratuita" not in prodotto["testo"]  # il template non e' un riferimento
+    assert any(r["fonte"].endswith("telefono-1/ (titolo)") for r in riferimenti)
+
+    # un testo ricalcato da una pagina analizzata viene riconosciuto, uno originale no
+    copiato = text_similarity.controlla(
+        "Il Telefono 1 offre una descrizione propria con dettagli unici.", riferimenti
+    )
+    originale = text_similarity.controlla(
+        "Schermo luminoso, batteria generosa e una fotocamera che non delude mai.", riferimenti
+    )
+    assert copiato["punteggio"] >= 8
+    assert originale["punteggio"] == 0
+
+
+def test_se_la_cache_non_e_scrivibile_l_analisi_riesce_e_lo_dice(monkeypatch, tmp_path):
+    _sito_finto(monkeypatch, _negozio_finto())
+    bloccata = tmp_path / "file"
+    bloccata.write_text("")
+    monkeypatch.setenv("SEO_ANALISI_CACHE_DIR", str(bloccata / "sotto"))  # non e' una cartella
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert "errore" not in report
+    assert "Testi non salvati" in report["controllo_somiglianza"]
