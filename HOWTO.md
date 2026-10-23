@@ -128,3 +128,21 @@ proprio sistema, es. `C:\Utenti\nome\push_contempt_mcp` su Windows o
 Chiedi all'assistente AI di controllare le scorte sotto soglia o lo stato
 SEO del catalogo (tool `prodotti_sotto_scorta` / `lista_stato_seo_prodotti`):
 se risponde con dati reali del sito, il collegamento funziona.
+
+## 6. Usare il tab SEO con i concorrenti
+
+Con tutto collegato, il tab **SEO** del plugin mostra due cose che alimenta
+l'assistente AI:
+
+- **Concorrenti e confronto**: chiedi all'assistente di analizzare un sito
+  («Analizza il sito https://… e dimmi com'è messo con la SEO»; serve
+  `uv run playwright install chromium` solo per i siti che bloccano le
+  richieste semplici). I punteggi compaiono nel tab. Fai analizzare anche il
+  tuo sito per vederlo come «Il tuo sito» e confrontarlo area per area.
+- **Versioni dei campi SEO**: ogni volta che l'assistente riscrive titolo SEO,
+  meta description e parola chiave di un prodotto, il plugin tiene la **base**
+  (il punto di partenza), il **precedente** e l'**attuale**. Dal tab si torna
+  alla base o al precedente con un click, anche su più prodotti.
+
+La spiegazione completa è nella guida a scomparsa del tab stesso e nel
+`README.md` del plugin (sezione «Il tab SEO»).
