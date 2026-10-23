@@ -250,9 +250,9 @@ def aggiorna_seo_prodotto(
     """Scrive titolo SEO, meta description e parola chiave focus di un prodotto
     (sovrascrive i valori esistenti). Restituisce prima/dopo per controllo,
     perché l'effetto è pubblico (quello che Google mostra in SERP). Invalida
-    anche la cache del sito. Il plugin conserva i valori precedenti alla prima
-    modifica: l'utente li ritrova nella tab SEO e puoi rimetterli con
-    ripristina_seo_prodotti. Se i testi si ispirano a un concorrente, passa in
+    anche la cache del sito. Il plugin tiene la base (stato prima del primo
+    intervento) e il precedente: l'utente li ritrova nella tab SEO e puoi
+    rimetterli con ripristina_seo_prodotti. Se i testi si ispirano a un concorrente, passa in
     `origine` il suo sito (es. "concorrente tomatosmartphone.it").
 
     Se i testi nascono da un'analisi di un sito concorrente (analizza_seo_sito o
@@ -268,15 +268,21 @@ def aggiorna_seo_prodotto(
 
 
 @mcp.tool()
-def ripristina_seo_prodotti(prodotto_ids: list[int]) -> dict:
+def ripristina_seo_prodotti(prodotto_ids: list[int], versione: str = "base") -> dict:
     """Rimette titolo SEO, meta description e parola chiave focus di uno o più
-    prodotti come erano prima del primo intervento (il plugin li ha conservati).
-    Un prodotto mai modificato non viene toccato. Restituisce l'esito per ogni
-    id: "ripristinato", "nessuno_snapshot" o "non_trovato". Invalida anche la
-    cache del sito. Usalo solo su richiesta dell'utente: sovrascrive i testi
-    attuali.
+    prodotti come in una delle versioni conservate dal plugin: "base" (il punto
+    di partenza, di norma lo stato originale di Yoast) o "precedente" (la
+    versione da cui si viene, cioè quella sostituita dall'ultima scrittura).
+    La versione che si lascia diventa il "precedente", quindi si può sempre
+    tornare indietro. Un prodotto mai modificato non viene toccato. Restituisce
+    l'esito per ogni id: "ripristinato", "gia_in_uso", "nessuno_snapshot" o
+    "non_trovato". Invalida anche la cache del sito. Usalo solo su richiesta
+    dell'utente: sovrascrive i testi attuali. Non esiste un tool per ridefinire
+    la base: lo fa solo l'utente dalla tab SEO.
     """
-    risultato = seo_tools.ripristina_seo_prodotti(prodotto_ids)
+    risultato = seo_tools.ripristina_seo_prodotti(prodotto_ids, versione)
+    if "errore" in risultato:
+        return risultato
     return {"esiti": risultato, **cache_tools.purga_cache()}
 
 

@@ -90,10 +90,13 @@ Copia `.env.example` in `.env` e compila:
 - `leggi_seo_prodotto` / `leggi_seo_prodotti_selezionati` /
   `aggiorna_seo_prodotto` — lettura/scrittura dei campi Yoast (titolo SEO,
   meta description, parola chiave focus) di uno o più prodotti. Solo I/O:
-  l'ottimizzazione dei testi la fa chi chiama i tool. La prima scrittura fa
-  conservare al plugin i valori precedenti (`origine` dice chi ha scritto).
-- `ripristina_seo_prodotti` — rimette i campi Yoast di uno o più prodotti come
-  erano prima del primo intervento; i prodotti mai modificati non si toccano.
+  l'ottimizzazione dei testi la fa chi chiama i tool. Il plugin tiene
+  base e precedente di ogni prodotto (`origine` dice chi ha scritto).
+- `ripristina_seo_prodotti` — rimette i campi Yoast di uno o più prodotti come nella
+  **base** (punto di partenza, di norma lo stato originale di Yoast) o nel **precedente**
+  (la versione sostituita dall'ultima scrittura); la versione lasciata diventa il precedente,
+  quindi si può tornare indietro. I prodotti mai modificati non si toccano. Ridefinire la base
+  non è un tool: lo fa solo l'utente dalla tab SEO.
 - `aggiorna_seo_categoria` — stessa cosa per le categorie prodotto
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).

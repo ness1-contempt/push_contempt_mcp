@@ -78,9 +78,10 @@ def aggiorna_seo_prodotto(
 
     Sovrascrive i valori esistenti. Restituisce il prima/dopo per poterlo
     controllare: l'effetto e' pubblico (quello che Google mostra in SERP).
-    Il plugin conserva i valori precedenti alla prima modifica (si tornano a
-    mettere con ripristina_seo_prodotti); `origine` dice chi ha scritto e
-    compare nella tab SEO accanto al valore conservato.
+    Il plugin tiene la base (lo stato prima del primo intervento) e il
+    precedente (la versione appena sostituita): si tornano a mettere con
+    ripristina_seo_prodotti. `origine` dice chi ha scritto e compare nella tab
+    SEO accanto alla versione.
     """
     prima = leggi_seo_prodotto(prodotto_id)
     if "errore" in prima:
@@ -117,15 +118,20 @@ def aggiorna_seo_prodotto(
     }
 
 
-def ripristina_seo_prodotti(prodotto_ids: list[int]) -> dict:
-    """Rimette titolo SEO, meta description e parola chiave focus come erano
-    prima del primo intervento (valori conservati dal plugin). Restituisce per
-    ogni id l'esito: "ripristinato", "nessuno_snapshot" (mai modificato, non
+def ripristina_seo_prodotti(prodotto_ids: list[int], versione: str = "base") -> dict:
+    """Rimette titolo SEO, meta description e parola chiave focus come nella
+    versione scelta fra quelle conservate dal plugin: "base" (il punto di
+    partenza, di norma lo stato originale di Yoast) o "precedente" (la versione
+    da cui si viene). La versione che si lascia diventa il "precedente", quindi
+    si puo' sempre tornare indietro. Restituisce per ogni id l'esito:
+    "ripristinato", "gia_in_uso", "nessuno_snapshot" (mai modificato, non
     toccato) o "non_trovato"."""
+    if versione not in ("base", "precedente"):
+        return {"errore": 'La versione va scelta fra "base" e "precedente".'}
     site = os.environ["WP_SITE_URL"]
     risposta = requests.post(
         f"{site}/wp-json/push-contempt/v1/seo/ripristina",
-        json={"ids": prodotto_ids},
+        json={"ids": prodotto_ids, "versione": versione},
         auth=_auth(),
         verify=False,
         timeout=30,

@@ -201,10 +201,22 @@ def test_ripristina_seo_prodotti_chiama_il_plugin_e_restituisce_gli_esiti(monkey
     monkeypatch.setattr(requests, "post", post_finto)
 
     risultato = ripristina_seo_prodotti([40, 41])
+    ripristina_seo_prodotti([40], "precedente")
 
     url = "https://localhost/wp-json/push-contempt/v1/seo/ripristina"
-    assert chiamate == [{"url": url, "json": {"ids": [40, 41]}}]
+    assert chiamate == [
+        {"url": url, "json": {"ids": [40, 41], "versione": "base"}},
+        {"url": url, "json": {"ids": [40], "versione": "precedente"}},
+    ]
     assert risultato == {"40": "ripristinato", "41": "nessuno_snapshot"}
+
+
+def test_ripristina_seo_prodotti_rifiuta_una_versione_sconosciuta(monkeypatch):
+    def post_che_non_deve_partire(*args, **kwargs):
+        raise AssertionError("nessuna richiesta per una versione non valida")
+
+    monkeypatch.setattr(requests, "post", post_che_non_deve_partire)
+    assert "errore" in ripristina_seo_prodotti([40], "ultima_scrittura")
 
 
 def _report(sito="https://www.euronics.it"):
