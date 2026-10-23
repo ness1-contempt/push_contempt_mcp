@@ -1210,3 +1210,85 @@ def test_le_parole_proprie_escludono_il_template(monkeypatch):
     # il paragrafo proprio ha 9 parole: la frase di spedizione (template) non conta
     prodotto = next(p for p in report["pagine"] if p["url"].endswith("telefono-1/"))
     assert prodotto["n_parole"] > 9
+
+
+# --- siti con indirizzi dei prodotti non riconoscibili (es. concessionarie) ---
+
+
+def test_gruppo_dominante_trova_le_schede_senza_un_indirizzo_noto():
+    schede = [f"https://esempio.it/scheda-auto/{i}-audi-a3.html" for i in range(1, 8)]
+    altre = ["https://esempio.it/chi-siamo.html", "https://esempio.it/contatti.html"]
+    gruppo, tratto = competitor_seo._gruppo_dominante(altre + schede)
+    assert gruppo == schede and tratto == "/scheda-auto/"
+
+
+def test_gruppo_dominante_non_scambia_blog_e_piccoli_gruppi_per_prodotti():
+    articoli = [f"https://esempio.it/blog/articolo-{i}" for i in range(40)]
+    assert competitor_seo._gruppo_dominante(articoli) == ([], "")
+    pochi = [f"https://esempio.it/auto/{i}" for i in range(4)]  # meno di 5
+    assert competitor_seo._gruppo_dominante(pochi) == ([], "")
+    sparsi = [f"https://esempio.it/{x}/{i}" for i, x in enumerate("abcdefghij")]
+    assert competitor_seo._gruppo_dominante(sparsi) == ([], "")
+    assert competitor_seo._gruppo_dominante([]) == ([], "")
+
+
+def _concessionaria():
+    base = "https://esempio.it"
+    schede = [f"{base}/scheda-auto/{i}-modello-{i}.html" for i in range(1, 21)]
+    voci = ["<url><loc>" + u + "</loc></url>" for u in schede]
+    voci += [
+        f"<url><loc>{base}/chi-siamo.html</loc></url>",
+        "<url><loc>http://altro-dominio.example/privacy.html</loc></url>",  # altro dominio
+        "<url><loc>http://altro-dominio.example/scheda-auto/1-estranea.html</loc></url>",
+    ]
+    sito = {
+        f"{base}/sitemap.xml": (200, "<urlset>" + "".join(voci) + "</urlset>"),
+        f"{base}/": (200, _pagina_html("Home", "Auto usate", schema="AutoDealer")),
+    }
+    for i, u in enumerate(schede, 1):
+        sito[u] = (200, _pagina_html(f"Auto {i}", f"Auto {i}"))
+    return sito, schede
+
+
+def test_senza_indirizzi_noti_si_campiona_il_gruppo_piu_numeroso_della_sitemap(monkeypatch):
+    sito, schede = _concessionaria()
+    richieste = _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert report["campione"]["prodotti"] == 10
+    assert report["sitemap"]["url_trovati"]["prodotti"] == 20  # le 2 di un altro dominio no
+    assert any(
+        "gruppo piu' numeroso della sitemap (/scheda-auto/, 20" in a for a in report["avvisi"]
+    )
+    assert all(p["url"] in schede or p["tipo"] == "home" for p in report["pagine"])
+    assert report["valutazione"]["affidabilita"] == "adeguata"
+    assert not any("altro-dominio" in r for r in richieste)  # non si esce dal dominio indicato
+
+
+def test_le_sitemap_non_portano_fuori_dal_dominio_nemmeno_con_indirizzi_riconosciuti(monkeypatch):
+    sito = _negozio_finto()
+    base = "https://esempio.it"
+    estranei = [f"http://altro-dominio.example/prodotto/estraneo-{i}/" for i in range(10)]
+    sito[f"{base}/product-sitemap.xml"] = (
+        200,
+        "<urlset>"
+        + "".join(f"<url><loc>{u}</loc></url>" for u in estranei)
+        + f"<url><loc>{base}/prodotto/telefono-1/</loc></url></urlset>",
+    )
+    richieste = _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(base)
+
+    assert report["sitemap"]["url_trovati"]["prodotti"] == 1
+    assert not any("altro-dominio" in r for r in richieste)
+
+
+def test_con_la_sola_home_il_report_non_da_un_punteggio_complessivo(monkeypatch):
+    _sito_finto(monkeypatch, {"https://esempio.it/": (200, _pagina_html("Home", "Benvenuti"))})
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert report["valutazione"]["punteggio"] is None
+    assert report["valutazione"]["affidabilita"] == "bassa"
+    assert report["valutazione"]["aree"]["titoli"]["punteggio"] is not None

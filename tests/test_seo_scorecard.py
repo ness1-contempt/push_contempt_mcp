@@ -144,7 +144,7 @@ def test_aree_senza_dati_non_hanno_punteggio_e_non_contano_nel_totale():
         "criteri": [],
         "nota": "Non misurabile con i dati raccolti.",
     }
-    assert isinstance(risultato["punteggio"], int)  # il totale si calcola sulle altre aree
+    assert risultato["punteggio"] is None  # una sola pagina: campione troppo piccolo
 
 
 def test_pagine_salvate_non_penalizzate_per_sitemap_e_https_non_verificabili():
@@ -158,7 +158,7 @@ def test_pagine_salvate_non_penalizzate_per_sitemap_e_https_non_verificabili():
 
 def test_senza_pagine_il_punteggio_e_zero_senza_errori():
     risultato = valuta([], True, True)
-    assert risultato["punteggio"] == 0
+    assert risultato["punteggio"] is None and risultato["affidabilita"] == "bassa"
     assert all(a["punteggio"] is None or a["punteggio"] >= 0 for a in risultato["aree"].values())
 
 
@@ -197,3 +197,20 @@ def test_l_area_tecnica_pesa_meno_perche_e_di_serie_sulle_piattaforme():
     assert seo_scorecard.PESI_AREE["tecnico"] < min(
         peso for area, peso in seo_scorecard.PESI_AREE.items() if area != "tecnico"
     )
+
+
+def test_campione_troppo_piccolo_non_da_il_punteggio_complessivo_ma_le_aree_restano():
+    solo_home = valuta([pagina("home", 0)], True, True)
+    assert solo_home["punteggio"] is None
+    assert solo_home["affidabilita"] == "bassa"
+    assert "nessuna scheda prodotto o categoria" in solo_home["significato"]
+    assert solo_home["aree"]["titoli"]["punteggio"] is not None  # le aree si vedono comunque
+
+    quattro = valuta([pagina("home", 0), *[pagina("prodotto", i) for i in range(1, 4)]], True, True)
+    assert quattro["punteggio"] is None and "ne servono almeno 5" in quattro["significato"]
+
+    cinque = valuta([pagina("home", 0), *[pagina("prodotto", i) for i in range(1, 5)]], True, True)
+    assert isinstance(cinque["punteggio"], int) and cinque["affidabilita"] == "adeguata"
+
+    solo_home_molte = valuta([pagina("home", i) for i in range(8)], True, True)
+    assert solo_home_molte["punteggio"] is None  # tante pagine, ma nessuna scheda

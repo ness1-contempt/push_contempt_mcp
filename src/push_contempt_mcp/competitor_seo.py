@@ -726,10 +726,45 @@ def _scarica_sitemap(scaricatore: _Scaricatore, url: str) -> str | None:
     return None
 
 
-def _urls_dalla_sitemap(scaricatore: _Scaricatore) -> tuple[dict[str, list[str]], str | None]:
-    """URL di categorie e prodotti trovati nella sitemap (indice o piatta) e
-    indirizzo della sitemap usata (None se non se ne trova nessuna)."""
+_SEGMENTI_NON_PRODOTTO = frozenset(
+    "blog news notizie articoli articolo post posts tag tags author autore pagina pagine page "
+    "pages wp-content wp-json feed amp".split()
+)
+MIN_URL_GRUPPO_DOMINANTE = 5
+
+
+def _gruppo_dominante(urls: list[str]) -> tuple[list[str], str]:
+    """Gli indirizzi che condividono il primo tratto del percorso (es. /scheda-auto/),
+    se sono il gruppo piu' numeroso e abbastanza grande: per i siti i cui prodotti
+    non hanno un indirizzo riconoscibile (auto, immobili, annunci). Esclude blog e
+    simili. Restituisce (indirizzi, tratto) o ([], "")."""
+    gruppi: dict[str, list[str]] = {}
+    for url in urls:
+        segmenti = [x for x in urlsplit(url).path.lower().split("/") if x]
+        # un solo tratto (es. /contatti.html) e' una pagina, non un gruppo
+        if len(segmenti) >= 2 and segmenti[0] not in _SEGMENTI_NON_PRODOTTO:
+            gruppi.setdefault(segmenti[0], []).append(url)
+    if not gruppi:
+        return [], ""
+    nome, elenco = max(gruppi.items(), key=lambda voce: len(voce[1]))
+    if len(elenco) < MIN_URL_GRUPPO_DOMINANTE or len(elenco) <= 0.3 * len(urls):
+        return [], ""
+    return elenco, f"/{nome}/"
+
+
+def _urls_dalla_sitemap(
+    scaricatore: _Scaricatore,
+) -> tuple[dict[str, list[str]], str | None, list[str]]:
+    """URL di categorie e prodotti trovati nella sitemap (indice o piatta), indirizzo
+    della sitemap usata (None se non se ne trova nessuna) e gli altri indirizzi che
+    non si riconoscono. Solo indirizzi del dominio analizzato: le sitemap a volte
+    elencano anche altri domini."""
     trovati: dict[str, list[str]] = {"categoria": [], "prodotto": []}
+    altri: list[str] = []
+
+    def stesso_dominio(urls: list[str]) -> list[str]:
+        return [u for u in urls if _host_base(u) == scaricatore.host]
+
     candidate = list(
         dict.fromkeys(
             scaricatore.sitemap_dichiarate
@@ -753,14 +788,16 @@ def _urls_dalla_sitemap(scaricatore: _Scaricatore) -> tuple[dict[str, list[str]]
                 for figlia in elenco[:MAX_SITEMAP_FIGLIE]:
                     contenuto = _scarica_sitemap(scaricatore, figlia)
                     if contenuto:
-                        trovati[tipo].extend(_estrai_loc(contenuto))
+                        trovati[tipo].extend(stesso_dominio(_estrai_loc(contenuto)))
         else:
-            for url in _estrai_loc(testo):
+            for url in stesso_dominio(_estrai_loc(testo)):
                 tipo = _tipo_da_percorso(url)
                 if tipo:
                     trovati[tipo].append(url)
-        return trovati, indirizzo
-    return trovati, None
+                else:
+                    altri.append(url)
+        return trovati, indirizzo, altri
+    return trovati, None, altri
 
 
 # --- aggregazione -----------------------------------------------------------
@@ -1025,7 +1062,7 @@ def _analizza(
     avvisi: list[str] = []
     avvisi.extend(_avviso_javascript(home))
 
-    trovati, sitemap = _urls_dalla_sitemap(scaricatore)
+    trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
     if sitemap is None:
         avvisi.append(
             "Nessuna sitemap trovata: le pagine di esempio sono scelte dai link della home."
@@ -1038,6 +1075,14 @@ def _analizza(
             da_home[tipo].append(link)
     for tipo in da_home:
         trovati[tipo] = _senza_varianti_lingua(trovati[tipo] or da_home[tipo])
+    if not trovati["prodotto"]:
+        gruppo, tratto = _gruppo_dominante(altri)
+        if gruppo:
+            trovati["prodotto"] = gruppo
+            avvisi.append(
+                f"Nessun indirizzo di prodotto riconosciuto: ho trattato come prodotti le pagine "
+                f"del gruppo piu' numeroso della sitemap ({tratto}, {len(gruppo)} indirizzi)."
+            )
     urls_in_sitemap = {"categorie": len(trovati["categoria"]), "prodotti": len(trovati["prodotto"])}
 
     campione = [

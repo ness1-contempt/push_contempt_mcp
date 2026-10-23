@@ -46,6 +46,8 @@ SIGNIFICATO = {
     9: "Eccellente: modello su quasi tutti i punti misurati.",
 }
 
+PAGINE_MINIME = 5  # sotto questo numero di pagine il punteggio complessivo non e' significativo
+
 LIMITI = (
     "Valutazione della sola struttura, su un campione di pagine: non misura "
     "posizionamento, autorevolezza, velocita' ne' qualita' dei testi."
@@ -382,9 +384,25 @@ def valuta(pagine: list[dict], sitemap_trovata: bool | None, https: bool | None)
     complessivo = (
         round(sum(PESI_AREE[n] * a["punteggio"] for n, a in misurate.items()) / peso) if peso else 0
     )
+    senza_schede = not any(p["tipo"] in ("prodotto", "categoria") for p in pagine)
+    if len(pagine) < PAGINE_MINIME or senza_schede:
+        # Con una pagina o con la sola home un punteggio complessivo sarebbe fuorviante.
+        motivo = "nessuna scheda prodotto o categoria" if senza_schede else "ne servono almeno 5"
+        return {
+            "punteggio": None,
+            "significato": (
+                f"Campione troppo piccolo per un punteggio complessivo: {len(pagine)} pagine, "
+                f"{motivo}."
+            ),
+            "affidabilita": "bassa",
+            "aree": aree,
+            "pagine_valutate": len(pagine),
+            "limiti": LIMITI,
+        }
     return {
         "punteggio": complessivo,
         "significato": SIGNIFICATO[complessivo],
+        "affidabilita": "adeguata",
         "aree": aree,
         "pagine_valutate": len(pagine),
         "limiti": LIMITI,
