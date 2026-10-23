@@ -122,6 +122,23 @@ _RE_RUMORE_INTERFACCIA = re.compile(
 )
 
 
+def blocchi_ripetuti_nel_gruppo(
+    blocchi_per_pagina: list[list[str]], minimo_pagine: int = 3, quota: float = 0.8
+) -> set[str]:
+    """Blocchi presenti in quasi tutte le pagine di uno stesso tipo (almeno `quota`, e in
+    non meno di `minimo_pagine`). Serve per le pagine di elenco: filtri e ordinamenti sono
+    testo di interfaccia anche quando le categorie sono meno della meta' di tutte le
+    pagine e il confronto globale non li vede. Non si usa per i prodotti, dove le
+    etichette ripetute delle specifiche ("Batteria", "Display") sono contenuto."""
+    if len(blocchi_per_pagina) < minimo_pagine:
+        return set()
+    conteggio: Counter = Counter()
+    for blocchi in blocchi_per_pagina:
+        conteggio.update({_norm(b) for b in blocchi if not _e_campo_della_scheda(b)})
+    soglia = max(minimo_pagine, math.ceil(quota * len(blocchi_per_pagina)))
+    return {blocco for blocco, n in conteggio.items() if n >= soglia}
+
+
 def messaggi_ripetuti(ripetuti: dict[str, int]) -> list[dict]:
     """I blocchi ripetuti che sembrano messaggi (da 3 a 25 parole), i piu'
     diffusi per primi: inviti all'acquisto, spedizioni, resi, garanzie. Le frasi
@@ -282,11 +299,21 @@ def analizza_testi(pagine: list[dict], max_caratteri: int) -> dict:
     stile/intenzione e vocabolario."""
     ripetuti = blocchi_ripetuti([p["_blocchi_tutti"] for p in pagine])
     intestazioni = intestazioni_ripetute([p["h2"] for p in pagine])
+    categorie = [p for p in pagine if p["tipo"] == "categoria"]
+    ripetuti_categorie = blocchi_ripetuti_nel_gruppo([p["_blocchi_tutti"] for p in categorie])
+    intestazioni_categorie = {
+        _norm(h) for h in blocchi_ripetuti_nel_gruppo([p["h2"] for p in categorie])
+    }
     for pagina in pagine:
         blocchi = pagina.pop("_blocchi")
         pagina.pop("_blocchi_tutti")
         propri = senza_ripetuti(blocchi, ripetuti)
-        pagina["h2"] = [h for h in pagina["h2"] if _norm(h) not in intestazioni]
+        if pagina["tipo"] == "categoria":
+            propri = [b for b in propri if _norm(b) not in ripetuti_categorie]
+            intestazioni_da_togliere = intestazioni | intestazioni_categorie
+        else:
+            intestazioni_da_togliere = intestazioni
+        pagina["h2"] = [h for h in pagina["h2"] if _norm(h) not in intestazioni_da_togliere]
         titoli = {_norm(t) for t in [pagina["titolo"], *pagina["h1"]] if t}
         pagina["estratto"] = estratto(propri, max_caratteri, titoli)
         pagina["_segnali"] = segnali_pagina(blocchi, propri)

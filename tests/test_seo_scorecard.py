@@ -1,5 +1,22 @@
+import random
+
+import pytest
+
 from push_contempt_mcp import seo_scorecard
 from push_contempt_mcp.seo_scorecard import _sembra_scheda_incollata, valuta
+
+_LESSICO = (
+    "display luminoso batteria autonomia fotocamera notturna ricarica rapida memoria veloce "
+    "schermo fluido audio stereo resistente acqua leggero sottile elegante potente scatti nitidi "
+    "video stabili giochi fluidi viaggi lunghi lavoro studio musica sport foto ritratti zoom "
+    "sensore software aggiornato sicuro privato garantito spedizione gratuita reso facile"
+).split()
+
+
+def _meta_propria(i: int) -> str:
+    """Una meta description con testo proprio e diverso per ogni pagina."""
+    parole = random.Random(i).sample(_LESSICO, 9)
+    return f"Modello {i}: " + " ".join(parole) + ". Scoprilo ora con tutte le sue caratteristiche."
 
 
 def pagina(tipo="prodotto", i=0, **campi):
@@ -7,10 +24,7 @@ def pagina(tipo="prodotto", i=0, **campi):
     base = {
         "tipo": tipo,
         "titolo": f"Smartphone Esempio Modello {i} 256GB | Negozio",  # 45 caratteri
-        "meta_description": (
-            f"Scopri lo smartphone Esempio Modello {i}: display luminoso, batteria che dura due "
-            "giorni e consegna in 24 ore. Acquistalo ora."
-        ),
+        "meta_description": _meta_propria(i),
         "h1": [f"Modello {i}"],
         "h2": ["Caratteristiche"],
         "n_h3": 0,
@@ -86,7 +100,7 @@ def test_un_sito_scadente_prende_un_punteggio_basso_con_le_prove():
     assert aree["dati_strutturati"]["punteggio"] <= 1
     evidenze = {c["criterio"]: c["evidenza"] for a in aree.values() for c in a["criteri"]}
     assert evidenze["meta description utile"].startswith(
-        "pagine con una meta description utile: 0 su 6"
+        "meta description con testo proprio: 0 su 6"
     )
     assert "home: nessuna" in evidenze["meta description utile"]
     assert evidenze["titoli diversi fra loro"] == "titoli distinti: 1 su 6"
@@ -128,7 +142,8 @@ def test_meta_incollata_dalla_scheda_pesa_sul_punteggio():
     # presente ma inutile: non vale come meta description, e non guadagna credito per
     # lunghezza o unicita'
     assert evidenze["meta description utile"] == (
-        "pagine con una meta description utile: 0 su 6 (6 presenti, 6 sembrano la scheda incollata)"
+        "meta description con testo proprio: 0 su 6 (6 presenti, 6 scheda incollata; "
+        "la formula vale 0.5)"
     )
     assert [c["criterio"] for c in meta["criteri"]] == ["meta description utile"]
     assert meta["punteggio"] == 0
@@ -235,10 +250,11 @@ def test_alt_mancante_oltre_il_35_percento_limita_il_contenuto_a_6():
 
     assert area["punteggio"] == 6
     assert area["punteggio_prima_dei_tetti"] > 6  # senza il tetto sarebbe piu' alto
-    [tetto] = area["tetti"]
-    assert tetto["scatta"] is True and tetto["voto_massimo"] == 6
-    assert tetto["misura"] == "immagini senza ALT: 40 su 100 (40%)"
-    assert tetto["effetto"].startswith("abbassa il voto da ")
+    primo, secondo = area["tetti"]
+    assert primo["scatta"] is True and primo["voto_massimo"] == 6
+    assert primo["misura"] == "immagini senza ALT: 40 su 100 (40%)"
+    assert primo["effetto"].startswith("abbassa il voto da ")
+    assert secondo["scatta"] is False  # il 50% non e' superato
 
 
 def test_alt_mancante_esattamente_al_35_percento_non_fa_scattare_il_tetto():
@@ -268,9 +284,8 @@ def test_il_tetto_non_alza_mai_un_voto_gia_basso():
     area = _contenuto(pagine)
 
     assert area["punteggio"] < 6  # gia' sotto il limite del tetto
-    [tetto] = area["tetti"]
-    assert tetto["scatta"] is True
-    assert tetto["effetto"].startswith("nessun effetto")
+    assert all(t["scatta"] for t in area["tetti"])  # 100% senza ALT: scattano entrambi
+    assert all(t["effetto"].startswith("nessun effetto") for t in area["tetti"])
     assert "punteggio_prima_dei_tetti" not in area
 
 
@@ -313,3 +328,107 @@ def test_i_tetti_pesano_sul_punteggio_complessivo():
     assert con_difetti["aree"]["contenuto"]["punteggio"] == 6
     assert con_difetti["aree"]["intestazioni"]["punteggio"] == 6
     assert con_difetti["punteggio"] < buoni["punteggio"]
+
+
+def test_alt_mancante_oltre_il_50_percento_limita_il_contenuto_a_5():
+    pagine = [pagina("prodotto", i, immagini=10, immagini_senza_alt=6) for i in range(10)]  # 60%
+    area = _contenuto(pagine)
+
+    assert area["punteggio"] == 5
+    primo, secondo = area["tetti"]
+    assert primo["scatta"] and secondo["scatta"]
+    assert secondo["voto_massimo"] == 5 and "oltre il 50%" in secondo["regola"]
+    assert secondo["effetto"].startswith("abbassa il voto da ")
+
+
+# --- meta description: quanto aggiunge al titolo -----------------------------
+
+
+def _con_meta(titolo, meta, i=0):
+    return pagina("prodotto", i, titolo=titolo, meta_description=meta, h1=[titolo.split(" | ")[0]])
+
+
+def _credito_meta(pagine):
+    area = valuta(pagine, True, True)["aree"]["meta_description"]
+    utile = next(c for c in area["criteri"] if c["criterio"] == "meta description utile")
+    return utile["valore"], utile["evidenza"]
+
+
+def test_meta_che_ripete_solo_il_titolo_non_vale_niente():
+    """AutoQuarta: 'Auto in vendita <titolo>'."""
+    pagine = [
+        _con_meta(
+            f"AUDI A3 modello {i} TDI In Vendita | Concessionaria Auto Usate",
+            f"Auto in vendita AUDI A3 modello {i} TDI",
+            i,
+        )
+        for i in range(6)
+    ]
+    valore, evidenza = _credito_meta(pagine)
+    assert valore == 0
+    assert "6 solo il titolo" in evidenza
+
+
+def test_titolo_piu_frase_generica_vale_mezzo_credito():
+    """Mediaworld: '<titolo>. Acquista online su Negozio o nei nostri negozi!'."""
+    pagine = [
+        _con_meta(
+            f"SAMSUNG Galaxy A{i} 128GB | Negozio",
+            f"SAMSUNG Galaxy A{i} 128GB. Acquista online su Negozio o nei nostri negozi fisici!",
+            i,
+        )
+        for i in range(6)
+    ]
+    valore, evidenza = _credito_meta(pagine)
+    assert valore == 0.5
+    assert "6 titolo piu' frase generica" in evidenza
+
+
+def test_frase_fissa_uguale_su_piu_della_meta_delle_pagine_non_vale_niente():
+    """Tomato: 'GARANZIA 12 MESI RESO GRATUITO ENTRO 14GG' su 8 pagine su 12."""
+    fissa = "GARANZIA 12 MESI RESO GRATUITO ENTRO 14GG su tutti gli ordini"
+    pagine = [_con_meta(f"APPLE iPhone {i} | Negozio", fissa, i) for i in range(8)]
+    pagine += [_con_meta(f"Pagina {i} | Negozio", _meta_propria(i), 100 + i) for i in range(4)]
+    valore, evidenza = _credito_meta(pagine)
+    assert "8 frase fissa" in evidenza
+    assert valore == pytest.approx(4 / 12, abs=0.01)  # solo le 4 pagine con testo proprio valgono
+
+
+def test_meta_con_testo_proprio_vale_il_massimo_e_le_regole_fra_pagine_servono_4_pagine():
+    pagine = [_con_meta(f"Prodotto {i} | Negozio", _meta_propria(i), i) for i in range(6)]
+    assert _credito_meta(pagine)[0] == 1.0
+    # con meno di 4 pagine non si puo' dire che una frase sia "uguale su molte pagine"
+    uguali = [
+        _con_meta(f"Prodotto {i} | Negozio", "Una frase molto generica ma uguale", i)
+        for i in range(3)
+    ]
+    assert _credito_meta(uguali)[0] == 1.0
+
+
+# --- H1: uno, piu' uguali, piu' diversi, nessuno ----------------------------
+
+
+def _valore_h1(h1_per_pagina):
+    pagine = [pagina("prodotto", i, h1=h1) for i, h1 in enumerate(h1_per_pagina)]
+    area = valuta(pagine, True, True)["aree"]["intestazioni"]
+    criterio = next(c for c in area["criteri"] if c["criterio"] == "un solo H1 per pagina")
+    return criterio["valore"], criterio["evidenza"]
+
+
+def test_h1_a_livelli():
+    assert _valore_h1([["Titolo"]] * 4)[0] == 1.0
+    assert (
+        _valore_h1([["Titolo", "Titolo"]] * 4)[0] == 0.6
+    )  # doppio e uguale (Euronics, Back Market)
+    assert _valore_h1([["Titolo", "Altro titolo"]] * 4)[0] == 0.3
+    assert _valore_h1([[]] * 4)[0] == 0  # nessun H1 (schede di Tomato)
+    # il confronto ignora maiuscole e punteggiatura
+    assert _valore_h1([["Galaxy A17, 128GB", "galaxy a17 128gb"]] * 2)[0] == 0.6
+
+
+def test_h1_misti_media_e_evidenza():
+    valore, evidenza = _valore_h1([["A"], ["B", "B"], ["C", "D"], []])
+    assert valore == pytest.approx((1.0 + 0.6 + 0.3 + 0) / 4, abs=0.01)
+    assert evidenza == (
+        "pagine con un solo H1: 1 su 4; piu' H1 uguali: 1; piu' H1 diversi: 1; nessun H1: 1"
+    )

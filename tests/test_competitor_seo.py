@@ -1704,3 +1704,24 @@ def test_nel_passaggio_ai_link_anche_le_categorie_vengono_dalla_pagina(monkeypat
 
     assert report["campione"]["categorie"] == 3  # le liste collegate dalla pagina
     assert report["campione"]["prodotti"] == 14
+
+
+def test_le_pagine_archivio_non_sono_prodotti(monkeypatch):
+    sito = _negozio_finto()
+    base = "https://esempio.it"
+    prodotti = [f"{base}/prodotto/telefono-{i}/" for i in range(1, 21)]
+    sito[f"{base}/product-sitemap.xml"] = (
+        200,
+        "<urlset>"
+        + "".join(f"<url><loc>{u}</loc></url>" for u in [f"{base}/shop"] + prodotti)
+        + "</urlset>",
+    )
+    sito[f"{base}/shop"] = (200, _pagina_html("Shop", "Shop"))
+    richieste = _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(base)
+
+    assert report["sitemap"]["url_trovati"]["prodotti"] == 20  # /shop escluso
+    assert f"{base}/shop" not in richieste
+    assert competitor_seo._e_archivio(f"{base}/shop")
+    assert not competitor_seo._e_archivio(f"{base}/prodotto/telefono-1/")

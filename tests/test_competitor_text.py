@@ -2,6 +2,7 @@ from push_contempt_mcp.competitor_text import (
     _norm,
     analizza_testi,
     blocchi_ripetuti,
+    blocchi_ripetuti_nel_gruppo,
     estratto,
     intestazioni_ripetute,
     messaggi_ripetuti,
@@ -220,3 +221,57 @@ def test_i_campi_della_scheda_non_sono_template_anche_se_si_ripetono():
     assert "filtra:" in ripetuti  # etichetta senza valore: e' un comando dell'interfaccia
     assert "condizioni: 9/10" not in ripetuti  # etichetta: valore = contenuto
     assert "brand: vintage" not in ripetuti
+
+
+def test_nelle_categorie_il_testo_dei_filtri_si_riconosce_anche_se_sono_poche_pagine():
+    def categoria(i):
+        titolo = f"Categoria {i}"
+        corpo = [f"Selezione di prodotti per {titolo} scelti dai nostri esperti"]
+        ui = ["Filtri attivi", "Rimuovi filtri", "Ordina per prezzo crescente"]
+        return {
+            "tipo": "categoria",
+            "titolo": titolo,
+            "h1": [titolo],
+            "h2": ["Filtra per", f"Guida {i}"],
+            "_blocchi_tutti": ui + corpo,
+            "_blocchi": ui + corpo,
+        }
+
+    def prodotto(i):
+        titolo = f"Telefono {i}"
+        specifiche = [
+            "Batteria: 5000 mAh",
+            "Display: AMOLED 6,7 pollici",
+            f"Descrizione unica del telefono numero {i}",
+        ]
+        return {
+            "tipo": "prodotto",
+            "titolo": titolo,
+            "h1": [titolo],
+            "h2": [],
+            "_blocchi_tutti": specifiche,
+            "_blocchi": specifiche,
+        }
+
+    # 3 categorie su 12 pagine: sotto la meta', il confronto globale non le vede
+    pagine = [categoria(i) for i in range(3)] + [prodotto(i) for i in range(9)]
+    risultato = analizza_testi(pagine, 300)
+
+    categorie = risultato["per_tipo"]["categoria"]["vocabolario"]["termini"]
+    termini_categorie = {t["termine"] for t in categorie}
+    assert "filtri" not in termini_categorie and "rimuovi" not in termini_categorie
+    assert (
+        pagine[0]["estratto"] == "Selezione di prodotti per Categoria 0 scelti dai nostri esperti"
+    )
+    assert pagine[0]["h2"] == ["Guida 0"]  # "Filtra per" e' interfaccia
+    # sui prodotti le etichette ripetute delle specifiche restano contenuto
+    prodotti = risultato["per_tipo"]["prodotto"]["vocabolario"]["termini"]
+    assert {"batteria", "display"} <= {t["termine"] for t in prodotti}
+    assert "Batteria: 5000 mAh" in pagine[3]["estratto"]
+
+
+def test_con_meno_di_3_categorie_non_si_decide():
+    gruppo = [["Filtri attivi", f"Testo {i}"] for i in range(2)]
+    assert blocchi_ripetuti_nel_gruppo(gruppo) == set()
+    tre = [["Filtri attivi", f"Testo {i}"] for i in range(3)]
+    assert blocchi_ripetuti_nel_gruppo(tre) == {"filtri attivi"}

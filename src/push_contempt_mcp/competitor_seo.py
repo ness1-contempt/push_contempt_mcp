@@ -776,6 +776,12 @@ def _gruppo_dominante(urls: list[str]) -> tuple[list[str], str]:
     return elenco, f"/{nome}/"
 
 
+def _e_archivio(url: str) -> bool:
+    """Pagina dell'elenco di tutto il negozio (es. /shop): un solo tratto di percorso. Non e'
+    una scheda prodotto, anche se sta nella sitemap dei prodotti."""
+    return len([x for x in urlsplit(url).path.split("/") if x]) <= 1
+
+
 def _urls_dalla_sitemap(
     scaricatore: _Scaricatore,
 ) -> tuple[dict[str, list[str]], str | None, list[str]]:
@@ -812,7 +818,10 @@ def _urls_dalla_sitemap(
                 for figlia in elenco[:MAX_SITEMAP_FIGLIE]:
                     contenuto = _scarica_sitemap(scaricatore, figlia)
                     if contenuto:
-                        trovati[tipo].extend(stesso_dominio(_estrai_loc(contenuto)))
+                        urls = stesso_dominio(_estrai_loc(contenuto))
+                        if tipo == "prodotto":
+                            urls = [u for u in urls if not _e_archivio(u)]
+                        trovati[tipo].extend(urls)
         else:
             for url in stesso_dominio(_estrai_loc(testo)):
                 tipo = _tipo_da_percorso(url)

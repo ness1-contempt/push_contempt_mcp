@@ -15,13 +15,16 @@ aree usare il sito come ispirazione.
 
 Oltre alla media dei criteri ci sono i "tetti": regole esplicite che limitano il voto
 di un'area quando c'e' un difetto grave, qualunque sia la media (immagini senza ALT
-oltre il 35% -> contenuto al massimo 6; H3 senza H2 su piu' della meta' delle pagine ->
+oltre il 35% -> contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su piu' della meta' delle pagine ->
 intestazioni al massimo 6). Il report mostra sempre ogni tetto con la sua misura, anche
 quando non scatta, e l'effetto che ha avuto. Le soglie sono costanti in testa al modulo.
 
 Cosa NON misura: posizionamento, autorevolezza, velocita', qualita' dei testi
 (solo struttura e quantita'). Funzioni pure: nessuna rete.
 """
+
+import re
+from collections import Counter
 
 # Soglie e pesi: tutto quello che si puo' voler cambiare e' qui.
 TITOLO_MIN, TITOLO_MAX = 30, 60
@@ -56,8 +59,23 @@ SIGNIFICATO = {
 # Il report li mostra sempre (regola, misura, se scatta e con quale effetto).
 ALT_MANCANTE_OLTRE = 0.35  # quota di immagini senza ALT oltre la quale scatta il tetto
 TETTO_ALT = 6  # voto massimo dell'area contenuto
+ALT_MANCANTE_OLTRE_2 = 0.5  # secondo livello: oltre la meta' delle immagini senza ALT
+TETTO_ALT_2 = 5
 PAGINE_H3_SENZA_H2_OLTRE = 0.5  # quota di pagine con H3 ma senza H2 oltre la quale scatta
 TETTO_GERARCHIA = 6  # voto massimo dell'area intestazioni
+
+# Meta description: quanto vale ciascun tipo (credito da 0 a 1 per pagina).
+CREDITO_META_PROPRIA = 1.0
+CREDITO_META_FORMULA = 0.5  # titolo (o nome del prodotto) piu' una frase generica uguale ovunque
+MIN_PAGINE_CONFRONTO = 4  # per giudicare "uguale su molte pagine" servono almeno cosi' tante pagine
+SOMIGLIANZA_FORMULA = (
+    0.7  # Jaccard fra le parti aggiunte al titolo, per dire che sono la stessa frase
+)
+PAROLE_NUOVE_MINIME = 3  # una meta che aggiunge meno parole al titolo e' "solo il titolo"
+# H1: valore di una pagina in base a quanti ne ha.
+VALORE_H1_UNO = 1.0
+VALORE_H1_UGUALI = 0.6  # piu' H1 con lo stesso testo
+VALORE_H1_DIVERSI = 0.3  # piu' H1 con testi diversi
 
 PAGINE_MINIME = 5  # sotto questo numero di pagine il punteggio complessivo non e' significativo
 
@@ -156,27 +174,76 @@ def _sembra_scheda_incollata(meta: str) -> bool:
     return sum(c[:-1].isupper() and len(c) > 3 for c in campi) >= 2
 
 
+def _parole(testo: str) -> list[str]:
+    return re.findall(r"\w+", testo.lower())
+
+
+def _jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a | b else 0.0
+
+
+def _classifica_meta(pagine: list[dict]) -> dict[int, tuple[str, float]]:
+    """Per ogni pagina con meta description (chiave: posizione nella lista) il tipo e il
+    credito. Tipi, dal peggiore: scheda incollata (0), frase fissa uguale su piu' della
+    meta' delle pagine (0), solo il titolo (0), titolo piu' una frase generica uguale su
+    molte pagine (mezzo credito), testo proprio (pieno)."""
+    con_meta = [(i, p) for i, p in enumerate(pagine) if p["meta_description"]]
+    n = len(con_meta)
+    uguali = Counter(" ".join(_parole(p["meta_description"])) for _, p in con_meta)
+    aggiunte = {}
+    for i, p in con_meta:
+        gia_dette = set(_parole(p["titolo"])) | {w for h in p["h1"] for w in _parole(h)}
+        aggiunte[i] = set(_parole(p["meta_description"])) - gia_dette
+    risultato: dict[int, tuple[str, float]] = {}
+    for i, p in con_meta:
+        testo = " ".join(_parole(p["meta_description"]))
+        if _sembra_scheda_incollata(p["meta_description"]):
+            risultato[i] = ("scheda incollata", 0.0)
+        elif n >= MIN_PAGINE_CONFRONTO and uguali[testo] > n / 2:
+            risultato[i] = ("frase fissa", 0.0)
+        elif len(aggiunte[i]) < PAROLE_NUOVE_MINIME:
+            risultato[i] = ("solo il titolo", 0.0)
+        elif n >= MIN_PAGINE_CONFRONTO and (
+            sum(
+                _jaccard(aggiunte[i], aggiunte[j]) >= SOMIGLIANZA_FORMULA
+                for j, _ in con_meta
+                if j != i
+            )
+            > (n - 1) / 2
+        ):
+            risultato[i] = ("titolo piu' frase generica", CREDITO_META_FORMULA)
+        else:
+            risultato[i] = ("testo proprio", CREDITO_META_PROPRIA)
+    return risultato
+
+
 def _meta(pagine: list[dict]) -> list[dict]:
-    """Una meta description conta solo se e' scritta per essere letta: una scheda
-    incollata ("CODICE: 12TAGLIA: M...") e' presente ma inutile, e non guadagna
-    credito per lunghezza o unicita'."""
+    """Una meta description vale in base a quanto aggiunge: vedi _classifica_meta. Una
+    scheda incollata, una frase fissa o il solo titolo non valgono niente e non
+    guadagnano credito per lunghezza o unicita'; titolo piu' frase generica vale la meta'."""
     if not pagine:
         return []
-    con_meta = [p for p in pagine if p["meta_description"]]
-    utili = [p for p in con_meta if not _sembra_scheda_incollata(p["meta_description"])]
-    incollate = len(con_meta) - len(utili)
-    dettaglio = f"{len(con_meta)} presenti"
-    if incollate:
-        dettaglio += f", {incollate} sembrano la scheda incollata"
-    dettaglio += _dettaglio_per_tipo(pagine)
+    tipi = _classifica_meta(pagine)
+    conteggio = Counter(tipo for tipo, _ in tipi.values())
+    crediti = sum(credito for _, credito in tipi.values())
+    dettagli = [f"{len(tipi)} presenti"]
+    dettagli += [
+        f"{conteggio[t]} {t}"
+        for t in ("titolo piu' frase generica", "solo il titolo", "frase fissa", "scheda incollata")
+        if conteggio[t]
+    ]
+    dettaglio = ", ".join(dettagli + _senza_meta_per_tipo(pagine))
+    pieno = conteggio["testo proprio"]
     criteri = [
         _criterio(
             "meta description utile",
-            _quota(len(utili), len(pagine)),
-            f"pagine con una meta description utile: {len(utili)} su {len(pagine)} ({dettaglio})",
+            crediti / len(pagine),
+            f"meta description con testo proprio: {pieno} su {len(pagine)} ({dettaglio}; "
+            f"la formula vale {CREDITO_META_FORMULA})",
             peso=3,
         )
     ]
+    utili = [pagine[i] for i, (_, credito) in tipi.items() if credito > 0]
     if utili:
         nel_range = sum(META_MIN <= len(p["meta_description"]) <= META_MAX for p in utili)
         distinte = len({p["meta_description"] for p in utili})
@@ -195,25 +262,40 @@ def _meta(pagine: list[dict]) -> list[dict]:
     return criteri
 
 
-def _dettaglio_per_tipo(pagine: list[dict]) -> str:
-    """Dove manca la meta description, per tipo di pagina (se manca ovunque in un tipo)."""
+def _senza_meta_per_tipo(pagine: list[dict]) -> list[str]:
+    """I tipi di pagina in cui la meta description manca ovunque (es. "categoria: nessuna")."""
     senza = []
     for tipo in ("home", "categoria", "prodotto"):
         gruppo = _per_tipo(pagine, tipo)
         if gruppo and not any(p["meta_description"] for p in gruppo):
             senza.append(f"{tipo}: nessuna")
-    return f" ({', '.join(senza)})" if senza else ""
+    return senza
 
 
 def _intestazioni(pagine: list[dict]) -> list[dict]:
     if not pagine:
         return []
-    un_h1 = sum(len(p["h1"]) == 1 for p in pagine)
+    uno = uguali = diversi = nessuno = 0
+    valore = 0.0
+    for p in pagine:
+        h1 = [" ".join(_parole(t)) for t in p["h1"]]
+        if len(h1) == 1:
+            uno += 1
+            valore += VALORE_H1_UNO
+        elif len(h1) > 1 and len(set(h1)) == 1:
+            uguali += 1
+            valore += VALORE_H1_UGUALI
+        elif len(h1) > 1:
+            diversi += 1
+            valore += VALORE_H1_DIVERSI
+        else:
+            nessuno += 1
     criteri = [
         _criterio(
             "un solo H1 per pagina",
-            _quota(un_h1, len(pagine)),
-            f"pagine con un solo H1: {un_h1} su {len(pagine)}",
+            valore / len(pagine),
+            f"pagine con un solo H1: {uno} su {len(pagine)}; piu' H1 uguali: {uguali}; "
+            f"piu' H1 diversi: {diversi}; nessun H1: {nessuno}",
             peso=2,
         )
     ]
@@ -416,13 +498,20 @@ def _tetti_contenuto(pagine: list[dict]) -> list[dict]:
     if not immagini:
         return []
     senza_alt = sum(p["immagini_senza_alt"] for p in pagine)
+    misura = f"immagini senza ALT: {senza_alt} su {immagini} ({round(100 * senza_alt / immagini)}%)"
     return [
         _tetto(
             f"immagini senza ALT oltre il {round(100 * ALT_MANCANTE_OLTRE)}%",
-            f"immagini senza ALT: {senza_alt} su {immagini} ({round(100 * senza_alt / immagini)}%)",
+            misura,
             senza_alt > ALT_MANCANTE_OLTRE * immagini,
             TETTO_ALT,
-        )
+        ),
+        _tetto(
+            f"immagini senza ALT oltre il {round(100 * ALT_MANCANTE_OLTRE_2)}%",
+            misura,
+            senza_alt > ALT_MANCANTE_OLTRE_2 * immagini,
+            TETTO_ALT_2,
+        ),
     ]
 
 

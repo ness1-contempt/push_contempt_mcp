@@ -142,8 +142,13 @@ Copia `.env.example` in `.env` e compila:
   da cui prendere spunto: è solo un riferimento, e un sito scadente può essere buono su
   un'area. Le soglie (lunghezze di titolo e meta, parole minime) sono costanti in testa al
   modulo. Alcuni difetti gravi pongono un **tetto** al voto dell'area (ALT mancante oltre il
-  35% delle immagini: contenuto al massimo 6; H3 senza H2 su più della metà delle pagine:
-  intestazioni al massimo 6); il report mostra ogni tetto con la sua misura e il suo effetto. Prima di proporre testi, all'utente vanno mostrati punteggio e aree, e lui decide
+  35% delle immagini: contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su più
+  della metà delle pagine: intestazioni al massimo 6); il report mostra ogni tetto con la sua
+  misura e il suo effetto. Regole decise con l'utente: una meta description vale in base a
+  quanto aggiunge al titolo (testo proprio 1; titolo più frase generica uguale su molte
+  pagine 0,5; solo il titolo, frase fissa uguale su più della metà delle pagine o scheda
+  incollata 0); gli H1 contano a livelli (uno solo 1; più H1 uguali 0,6; più H1 diversi 0,3;
+  nessuno 0). Prima di proporre testi, all'utente vanno mostrati punteggio e aree, e lui decide
   se e per quali aree usare il sito come ispirazione.
 
 **Manutenzione**
