@@ -282,6 +282,7 @@ def analizza_seo_sito(
     caratteri_per_pagina: int = 600,
     usa_curl: bool = False,
     usa_browser: bool = False,
+    browser_visibile: bool = False,
 ) -> dict:
     """Analizza a campione il sito di un altro negozio (di norma un concorrente)
     per capire come e' fatta la sua SEO e come descrive i prodotti: scarica la
@@ -342,9 +343,21 @@ def analizza_seo_sito(
     costruita con JavaScript, si aspetta il Retry-After e si passa al browser. Il
     report dice il `metodo` usato. Se nemmeno il browser basta, l'errore suggerisce
     analizza_pagine_salvate.
+
+    `browser_visibile`: come `usa_browser` ma con la finestra del browser visibile sullo
+    schermo dell'utente (SEO_ANALISI_BROWSER_VISIBILE=1 per averlo sempre). Alcuni siti
+    rifiutano il browser senza finestra e non quello visibile. Usalo solo se l'utente lo
+    chiede o lo approva dopo un rifiuto (403/429) anche con `usa_browser`: e' un tentativo
+    in piu' contro un rifiuto del sito, non il metodo predefinito.
     """
     return competitor_seo.analizza_seo_sito(
-        url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl, usa_browser
+        url,
+        max_categorie,
+        max_prodotti,
+        caratteri_per_pagina,
+        usa_curl,
+        usa_browser,
+        browser_visibile,
     )
 
 

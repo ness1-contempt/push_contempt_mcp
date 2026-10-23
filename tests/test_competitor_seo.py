@@ -950,11 +950,12 @@ def test_l_analisi_non_campiona_le_varianti_di_lingua(monkeypatch):
 
 def _installa_browser(monkeypatch, sito, errore_avvio=None):
     """Sostituisce _Browser con uno che serve le pagine di `sito` ({url: (status, testo)})."""
-    uso = {"istanze": 0, "richieste": [], "chiuso": 0}
+    uso = {"istanze": 0, "richieste": [], "chiuso": 0, "visibile": []}
 
     class BrowserFinto:
-        def __init__(self):
+        def __init__(self, visibile=False):
             uso["istanze"] += 1
+            uso["visibile"].append(visibile)
 
         def scarica(self, url, host_base):
             if errore_avvio:
@@ -1556,3 +1557,49 @@ def test_gli_h3_di_menu_e_footer_non_contano_per_la_gerarchia():
     )
     pagina, _ = _estrai_pagina(html, "https://esempio.it/p/", "prodotto", "esempio.it")
     assert pagina["n_h3"] == 1  # solo quello del contenuto
+
+
+def test_browser_visibile_implica_il_browser_e_si_avvia_con_la_finestra(monkeypatch):
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    _http_limitato(monkeypatch, _Risposta(403, "https://esempio.it/", ""))
+
+    report = analizza_seo_sito("https://esempio.it", browser_visibile=True)  # senza usa_browser
+
+    assert report["metodo"] == "browser"
+    assert uso["visibile"] == [True]
+    assert any("con la finestra visibile" in a for a in report["avvisi"])
+
+
+def test_il_browser_normale_resta_senza_finestra(monkeypatch):
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    _http_limitato(monkeypatch, _Risposta(403, "https://esempio.it/", ""))
+
+    report = analizza_seo_sito("https://esempio.it", usa_browser=True)
+
+    assert uso["visibile"] == [False]
+    assert not any("finestra visibile" in a for a in report["avvisi"])
+
+
+def test_browser_visibile_anche_con_la_variabile_d_ambiente(monkeypatch):
+    monkeypatch.setenv("SEO_ANALISI_BROWSER_VISIBILE", "1")
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    _http_limitato(monkeypatch, _Risposta(403, "https://esempio.it/", ""))
+
+    analizza_seo_sito("https://esempio.it")
+
+    assert uso["visibile"] == [True]
+
+
+def test_il_trasporto_browser_chiede_la_finestra_solo_se_visibile(monkeypatch):
+    richieste = []
+
+    def avvio_finto(visibile=False):
+        richieste.append(visibile)
+        raise RuntimeError("non serve davvero avviare Chromium")
+
+    monkeypatch.setattr(competitor_seo, "_avvia_playwright", avvio_finto)
+    monkeypatch.setattr(competitor_seo, "_risolvi", lambda host: ["93.184.216.34"])
+    for visibile in (False, True):
+        with pytest.raises(ErroreAnalisi, match="Browser non disponibile"):
+            competitor_seo._Browser(visibile).scarica("https://esempio.it/", "esempio.it")
+    assert richieste == [False, True]

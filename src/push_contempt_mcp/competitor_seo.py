@@ -263,14 +263,14 @@ def _scarica_grezzo_curl(url: str, host_base: str) -> _Risposta:
     return _scarica(url, host_base, _richiesta_curl)
 
 
-def _avvia_playwright():
-    """Avvia un Chromium senza finestra, con il suo User-Agent di serie, che non
-    scarica immagini, video e font (pesano sul sito e non servono all'analisi).
-    Restituisce (funzione che chiude tutto, pagina)."""
+def _avvia_playwright(visibile: bool = False):
+    """Avvia un Chromium (senza finestra, oppure con la finestra visibile se `visibile`),
+    con il suo User-Agent di serie, che non scarica immagini, video e font (pesano sul sito
+    e non servono all'analisi). Restituisce (funzione che chiude tutto, pagina)."""
     from playwright.sync_api import sync_playwright
 
     avvio = sync_playwright().start()
-    browser = avvio.chromium.launch(headless=True)
+    browser = avvio.chromium.launch(headless=not visibile)
     pagina = browser.new_page()
     pagina.route(
         "**/*",
@@ -292,7 +292,8 @@ class _Browser:
     """Trasporto con un browser vero: carica la pagina (JavaScript compreso) e ne
     restituisce l'HTML gia' costruito. Si avvia alla prima richiesta."""
 
-    def __init__(self):
+    def __init__(self, visibile: bool = False):
+        self.visibile = visibile
         self._chiudi = None
         self._pagina = None
 
@@ -300,7 +301,9 @@ class _Browser:
         _controlla_destinazione(url)
         if self._pagina is None:
             try:
-                self._chiudi, self._pagina = _avvia_playwright()
+                self._chiudi, self._pagina = (
+                    _avvia_playwright(visibile=True) if self.visibile else _avvia_playwright()
+                )
             except Exception as errore:  # noqa: BLE001 - Playwright non installato o senza Chromium
                 raise ErroreAnalisi(
                     f"Browser non disponibile: {errore.__class__.__name__}"
@@ -1214,8 +1217,10 @@ def _sembra_costruito_con_js(report: dict) -> bool:
     return any(a.startswith("La home ha quasi nessun testo") for a in report.get("avvisi", []))
 
 
-def _analizza_con_browser(url, max_categorie, max_prodotti, max_caratteri, motivo: str) -> dict:
-    browser = _Browser()
+def _analizza_con_browser(
+    url, max_categorie, max_prodotti, max_caratteri, motivo: str, visibile: bool = False
+) -> dict:
+    browser = _Browser(visibile)
     try:
         report = _analizza(
             url, max_categorie, max_prodotti, max_caratteri, browser=browser, ritenta_dopo_429=False
@@ -1225,7 +1230,10 @@ def _analizza_con_browser(url, max_categorie, max_prodotti, max_caratteri, motiv
     finally:
         browser.chiudi()
     report["metodo"] = "browser"
-    report["avvisi"].append(f"Pagine caricate con un browser (Chromium) perche' {motivo}.")
+    finestra = ", con la finestra visibile" if visibile else ""
+    report["avvisi"].append(
+        f"Pagine caricate con un browser (Chromium{finestra}) perche' {motivo}."
+    )
     return report
 
 
@@ -1236,6 +1244,7 @@ def analizza_seo_sito(
     caratteri_per_pagina: int = CARATTERI_DEFAULT,
     usa_curl: bool = False,
     usa_browser: bool = False,
+    browser_visibile: bool = False,
 ) -> dict:
     """Analisi SEO a campione del sito `url`; vedi la docstring del modulo.
     I limiti sono accettati entro un tetto massimo (`caratteri_per_pagina` e'
@@ -1250,7 +1259,8 @@ def analizza_seo_sito(
     max_categorie = max(0, min(max_categorie, TETTO_CATEGORIE))
     max_prodotti = max(0, min(max_prodotti, TETTO_PRODOTTI))
     caratteri_per_pagina = max(0, min(caratteri_per_pagina, TETTO_CARATTERI))
-    con_browser = usa_browser or os.environ.get("SEO_ANALISI_USA_BROWSER") == "1"
+    visibile = browser_visibile or os.environ.get("SEO_ANALISI_BROWSER_VISIBILE") == "1"
+    con_browser = visibile or usa_browser or os.environ.get("SEO_ANALISI_USA_BROWSER") == "1"
     try:
         try:
             report = _analizza(
@@ -1272,6 +1282,7 @@ def analizza_seo_sito(
                 max_prodotti,
                 caratteri_per_pagina,
                 "il sito rifiuta le richieste automatiche semplici",
+                visibile,
             )
         report["metodo"] = "curl" if usa_curl else "http"
         if con_browser and _sembra_costruito_con_js(report):
@@ -1282,6 +1293,7 @@ def analizza_seo_sito(
                     max_prodotti,
                     caratteri_per_pagina,
                     "le pagine sembrano costruite con JavaScript",
+                    visibile,
                 )
             except ErroreAnalisi as errore:
                 report["avvisi"].append(f"Provato anche con il browser, senza riuscirci: {errore}")

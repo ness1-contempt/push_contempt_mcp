@@ -111,7 +111,10 @@ Copia `.env.example` in `.env` e compila:
   (`.../smartphone-1001.html`) il campione viene dai link di quella pagina, senza sitemap. Metodi, dal più leggero: HTTP; se la home risponde 403/429 o è
   costruita con JavaScript e il browser è attivo (`SEO_ANALISI_USA_BROWSER=1` o
   `usa_browser`), dopo aver aspettato il `Retry-After` si passa a un Chromium vero in
-  locale; se non basta, `analizza_pagine_salvate`. Il report dice il `metodo` usato.
+  locale; se non basta, `analizza_pagine_salvate`. Con `browser_visibile` (o
+  `SEO_ANALISI_BROWSER_VISIBILE=1`) il browser si apre con la finestra visibile: alcuni siti
+  rifiutano quello senza finestra. È un tentativo in più dopo un rifiuto, da usare con il
+  consenso dell'utente. Il report dice il `metodo` usato.
   Con `usa_curl` (scelta esplicita dell'utente) fa
   le richieste con il programma `curl`, sempre con il nostro User-Agent dichiarato; se
   il sito risponde ancora 429 si ferma, non aggira i blocchi. Rifiuta reti private; per provarlo su un
