@@ -1484,3 +1484,66 @@ def test_il_report_mostra_la_composizione_e_segnala_gli_indirizzi_404(monkeypatc
     assert report["campione"]["composizione"]["prodotto"] == {"prodotto": 8}
     assert any("rispondono 404" in a and "sitemap non e' aggiornata" in a for a in report["avvisi"])
     assert any(s["motivo"] == "HTTP 404" for s in report["campione"]["pagine_saltate"])
+
+
+# --- indirizzo di una pagina di categoria (categorie piatte, es. /it/category/x-1001.html) ---
+
+
+def test_e_pagina_distingue_pagine_cartelle_e_radice():
+    assert competitor_seo._e_pagina("https://esempio.it/it/category/telefoni-1001.html")
+    assert competitor_seo._e_pagina("https://esempio.it/shop.php")
+    assert not competitor_seo._e_pagina("https://esempio.it/telefonia/")
+    assert not competitor_seo._e_pagina("https://esempio.it/telefonia")
+    assert not competitor_seo._e_pagina("https://esempio.it/")
+    assert not competitor_seo._e_pagina("https://esempio.it/dir.v2/sezione/")
+    assert competitor_seo._perimetro("https://esempio.it/it/category/telefoni-1001.html") == ""
+
+
+def _categoria_piatta():
+    base = "https://esempio.it"
+    prodotti = [f"{base}/it/product/_marca-modello-{i}-{9000 + i}.html" for i in range(12)]
+    sottocategorie = [f"{base}/it/category/{c}-100{i}.html" for i, c in enumerate("abc", 2)]
+    link = "".join(f'<a href="{u}">x</a>' for u in prodotti + sottocategorie)
+    pagina_categoria = (
+        "<html><head><title>Smartphone e cellulari al miglior prezzo | Negozio</title>"
+        '<meta name="description" content="La migliore selezione di smartphone e cellulari delle '
+        'migliori marche a ottimi prezzi, con consegna rapida e ritiro in negozio."></head>'
+        f"<body><h1>Smartphone e cellulari</h1>{link}</body></html>"
+    )
+    sito = {f"{base}/it/category/telefoni-1001.html": (200, pagina_categoria)}
+    for u in prodotti + sottocategorie:
+        sito[u] = (200, _pagina_html(u.rsplit("/", 1)[1], u.rsplit("/", 1)[1]))
+    # la sitemap esiste ma non deve servire: contiene prodotti di altri reparti
+    altri = "".join(f"<url><loc>{base}/it/product/_tv-{i}.html</loc></url>" for i in range(50))
+    sito[f"{base}/sitemap.xml"] = (200, f"<urlset>{altri}</urlset>")
+    return sito, prodotti, sottocategorie
+
+
+def test_indirizzo_di_una_pagina_di_categoria_campiona_dai_suoi_link(monkeypatch):
+    sito, prodotti, sottocategorie = _categoria_piatta()
+    richieste = _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(
+        "https://esempio.it/it/category/telefoni-1001.html", max_categorie=10, max_prodotti=30
+    )
+
+    assert "errore" not in report
+    assert report["perimetro"] == "pagina /it/category/telefoni-1001.html"
+    assert report["pagine"][0]["tipo"] == "sezione"
+    assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (3, 12)
+    campionati = {p["url"] for p in report["pagine"][1:]}
+    assert campionati == set(prodotti) | set(sottocategorie)
+    assert not any("_tv-" in r for r in richieste)  # nessun prodotto dalla sitemap
+    assert not any(r.endswith("sitemap.xml") for r in richieste)  # e nemmeno scaricata
+    assert any("pagina di categoria" in a for a in report["avvisi"])
+    assert "it" not in report["campione"]["composizione"]["prodotto"]  # il prefisso /it/ si salta
+
+
+def test_la_valutazione_di_una_pagina_di_categoria_non_penalizza_la_sitemap(monkeypatch):
+    sito, _, _ = _categoria_piatta()
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito("https://esempio.it/it/category/telefoni-1001.html")
+
+    criteri = [c["criterio"] for c in report["valutazione"]["aree"]["tecnico"]["criteri"]]
+    assert "sitemap" not in criteri and "HTTPS" in criteri

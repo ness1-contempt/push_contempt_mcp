@@ -301,7 +301,9 @@ def analizza_seo_sito(
 
     `url` puo' essere l'indirizzo del sito o di una sua SEZIONE (es.
     https://www.euronics.it/telefonia/): in quel caso sitemap e link restano dentro
-    quella sezione e il report indica il `perimetro`. Utile per i grandi cataloghi.
+    quella sezione e il report indica il `perimetro`. Utile per i grandi cataloghi. Se
+    punta a una PAGINA di categoria (es. .../smartphone-1001.html) il campione si sceglie
+    fra le sottocategorie e i prodotti che quella pagina elenca, senza usare la sitemap.
 
     COME USARLO: dal report ricava tu l'intenzione (informativa, comparativa,
     d'acquisto), il tono, cosa il sito enfatizza e come struttura le descrizioni,

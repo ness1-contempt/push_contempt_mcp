@@ -1015,6 +1015,7 @@ def _chiudi_analisi(
     avvisi: list[str],
     max_caratteri: int,
     in_rete: bool = True,
+    sitemap_verificata: bool = True,
 ) -> dict:
     """Parte comune a analizza_seo_sito e analizza_pagine_salvate: analisi del
     testo, valutazione della struttura SEO, salvataggio dei testi per
@@ -1038,7 +1039,7 @@ def _chiudi_analisi(
     report["controllo_somiglianza"] = confronto
     report["valutazione"] = seo_scorecard.valuta(
         pagine,
-        sitemap is not None if in_rete else None,
+        sitemap is not None if in_rete and sitemap_verificata else None,
         origine.startswith("https://") if in_rete else None,
     )
     report["valutazione"]["nota"] = (
@@ -1049,10 +1050,18 @@ def _chiudi_analisi(
     return report
 
 
+def _e_pagina(url: str) -> bool:
+    """L'indirizzo punta a una pagina (es. /it/category/telefoni-1001.html) e non a una
+    cartella o alla radice: in quel caso la "sezione" non e' un prefisso del percorso
+    ma cio' che la pagina elenca (sottocategorie e prodotti collegati)."""
+    percorso = urlsplit(url).path
+    return bool(percorso) and not percorso.endswith("/") and "." in percorso.rsplit("/", 1)[-1]
+
+
 def _perimetro(url: str) -> str:
     """Il percorso dell'indirizzo iniziale se punta a una sezione (es. /telefonia),
-    "" se punta alla radice del sito."""
-    return urlsplit(url).path.lower().rstrip("/")
+    "" se punta alla radice del sito o a una singola pagina (vedi _e_pagina)."""
+    return "" if _e_pagina(url) else urlsplit(url).path.lower().rstrip("/")
 
 
 def _nel_perimetro(url: str, perimetro: str) -> bool:
@@ -1071,7 +1080,10 @@ def _composizione(pagine: list[dict], perimetro: str) -> dict[str, dict[str, int
     for pagina in pagine:
         if pagina["tipo"] not in ("categoria", "prodotto"):
             continue
-        segmenti = [x for x in urlsplit(pagina["url"]).path.split("/") if x][saltare:]
+        segmenti = [x for x in urlsplit(pagina["url"]).path.split("/") if x]
+        if not perimetro and segmenti and re.fullmatch(r"[a-z]{2}", segmenti[0]):
+            segmenti = segmenti[1:]  # prefisso di lingua (/it/...)
+        segmenti = segmenti[saltare:]
         gruppo = segmenti[0] if len(segmenti) > 1 else "(radice)"
         tipo = composizione.setdefault(pagina["tipo"], {})
         tipo[gruppo] = tipo.get(gruppo, 0) + 1
@@ -1089,6 +1101,7 @@ def _analizza(
 ) -> dict:
     url = _normalizza_url(url)
     perimetro = _perimetro(url)
+    modo_pagina = _e_pagina(url)
     scaricatore = _Scaricatore(url, usa_curl, browser, ritenta_dopo_429)
     scaricatore.carica_robots()
 
@@ -1102,21 +1115,29 @@ def _analizza(
     home, link_home = _estrai_pagina(
         risposta_home.testo,
         risposta_home.url,
-        "sezione" if perimetro else "home",
+        "sezione" if perimetro or modo_pagina else "home",
         scaricatore.host,
     )
     pagine = [home]
     avvisi: list[str] = []
     avvisi.extend(_avviso_javascript(home))
 
-    trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
+    if modo_pagina:
+        # Il campione viene dai link della pagina: la sitemap non serve (e puo' essere enorme).
+        trovati, sitemap, altri = {"categoria": [], "prodotto": []}, None, []
+        avvisi.append(
+            "L'indirizzo e' una pagina di categoria: il campione e' scelto fra le sottocategorie e "
+            "i prodotti collegati da quella pagina, non dalla sitemap."
+        )
+    else:
+        trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
     if perimetro:
         # Si analizza solo la sezione indicata: sitemap e link restano dentro il suo percorso.
         trovati = {t: [u for u in v if _nel_perimetro(u, perimetro)] for t, v in trovati.items()}
         altri = [u for u in altri if _nel_perimetro(u, perimetro)]
         link_home = [u for u in link_home if _nel_perimetro(u, perimetro)]
         altri += [u for u in link_home if not _tipo_da_percorso(u) and u not in altri]
-    if sitemap is None:
+    if sitemap is None and not modo_pagina:
         avvisi.append(
             "Nessuna sitemap trovata: le pagine di esempio sono scelte dai link della home."
         )
@@ -1128,7 +1149,7 @@ def _analizza(
             da_home[tipo].append(link)
     for tipo in da_home:
         trovati[tipo] = _senza_varianti_lingua(trovati[tipo] or da_home[tipo])
-    if not trovati["prodotto"]:
+    if not trovati["prodotto"] and not modo_pagina:
         gruppo, tratto = _gruppo_dominante(altri)
         if gruppo:
             trovati["prodotto"] = gruppo
@@ -1174,9 +1195,16 @@ def _analizza(
             "la sitemap non e' aggiornata."
         )
     report = _chiudi_analisi(
-        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, max_caratteri
+        scaricatore.origine,
+        pagine,
+        saltate,
+        sitemap,
+        urls_in_sitemap,
+        avvisi,
+        max_caratteri,
+        sitemap_verificata=not modo_pagina,
     )
-    report["perimetro"] = perimetro or None
+    report["perimetro"] = f"pagina {urlsplit(url).path}" if modo_pagina else perimetro or None
     report["campione"]["composizione"] = _composizione(pagine, perimetro)
     return report
 
