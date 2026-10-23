@@ -28,6 +28,7 @@ async def test_list_tools():
             "lista_stato_seo_prodotti",
             "leggi_seo_prodotto",
             "aggiorna_seo_prodotto",
+            "ripristina_seo_prodotti",
             "aggiorna_seo_categoria",
             "leggi_analisi_seo_yoast",
             "analizza_seo_sito",

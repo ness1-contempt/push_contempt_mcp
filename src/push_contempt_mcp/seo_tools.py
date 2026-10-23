@@ -71,25 +71,32 @@ def aggiorna_seo_prodotto(
     titolo_seo: str,
     meta_description: str,
     parola_chiave_focus: str,
+    origine: str = "",
 ) -> dict:
     """Scrive titolo SEO, meta description e parola chiave focus di un prodotto.
 
     Sovrascrive i valori esistenti. Restituisce il prima/dopo per poterlo
     controllare: l'effetto e' pubblico (quello che Google mostra in SERP).
+    Il plugin conserva i valori precedenti alla prima modifica (si tornano a
+    mettere con ripristina_seo_prodotti); `origine` dice chi ha scritto e
+    compare nella tab SEO accanto al valore conservato.
     """
     prima = leggi_seo_prodotto(prodotto_id)
     if "errore" in prima:
         return prima
 
     site = os.environ["WP_SITE_URL"]
+    corpo = {
+        "id": prodotto_id,
+        "titolo_seo": titolo_seo,
+        "meta_description": meta_description,
+        "parola_chiave_focus": parola_chiave_focus,
+    }
+    if origine:
+        corpo["origine"] = origine
     risposta = requests.post(
         f"{site}/wp-json/push-contempt/v1/seo/prodotto",
-        json={
-            "id": prodotto_id,
-            "titolo_seo": titolo_seo,
-            "meta_description": meta_description,
-            "parola_chiave_focus": parola_chiave_focus,
-        },
+        json=corpo,
         auth=_auth(),
         verify=False,
         timeout=10,
@@ -107,6 +114,23 @@ def aggiorna_seo_prodotto(
         },
         "dopo": dopo,
     }
+
+
+def ripristina_seo_prodotti(prodotto_ids: list[int]) -> dict:
+    """Rimette titolo SEO, meta description e parola chiave focus come erano
+    prima del primo intervento (valori conservati dal plugin). Restituisce per
+    ogni id l'esito: "ripristinato", "nessuno_snapshot" (mai modificato, non
+    toccato) o "non_trovato"."""
+    site = os.environ["WP_SITE_URL"]
+    risposta = requests.post(
+        f"{site}/wp-json/push-contempt/v1/seo/ripristina",
+        json={"ids": prodotto_ids},
+        auth=_auth(),
+        verify=False,
+        timeout=30,
+    )
+    risposta.raise_for_status()
+    return risposta.json()
 
 
 def valida_contenuto_seo(descrizione: str, parola_chiave_focus: str) -> list[str]:

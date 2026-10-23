@@ -6,6 +6,7 @@ from push_contempt_mcp.seo_tools import (
     leggi_seo_prodotti_selezionati,
     leggi_seo_prodotto,
     lista_stato_seo_prodotti,
+    ripristina_seo_prodotti,
     valida_contenuto_seo,
 )
 
@@ -163,3 +164,42 @@ def test_valida_contenuto_seo_segnala_tutti_i_problemi():
     assert any("Frase chiave" in a for a in avvisi)
     assert any("sottotitolo" in a for a in avvisi)
     assert any("link interno" in a for a in avvisi)
+
+
+def test_aggiorna_seo_prodotto_passa_l_origine_solo_se_c_e(monkeypatch):
+    chiamate_post = []
+
+    def post_finto(url, json, auth, verify, timeout):
+        chiamate_post.append(json)
+        return _RispostaFinta({})
+
+    monkeypatch.setattr(
+        requests,
+        "get",
+        lambda *a, **k: _RispostaFinta(
+            {"titolo_seo": None, "meta_description": None, "parola_chiave_focus": None}
+        ),
+    )
+    monkeypatch.setattr(requests, "post", post_finto)
+
+    aggiorna_seo_prodotto(40, "T", "M", "k", origine="concorrente x.it")
+    aggiorna_seo_prodotto(40, "T", "M", "k")
+
+    assert chiamate_post[0]["origine"] == "concorrente x.it"
+    assert "origine" not in chiamate_post[1]
+
+
+def test_ripristina_seo_prodotti_chiama_il_plugin_e_restituisce_gli_esiti(monkeypatch):
+    chiamate = []
+
+    def post_finto(url, json, auth, verify, timeout):
+        chiamate.append({"url": url, "json": json})
+        return _RispostaFinta({"40": "ripristinato", "41": "nessuno_snapshot"})
+
+    monkeypatch.setattr(requests, "post", post_finto)
+
+    risultato = ripristina_seo_prodotti([40, 41])
+
+    url = "https://localhost/wp-json/push-contempt/v1/seo/ripristina"
+    assert chiamate == [{"url": url, "json": {"ids": [40, 41]}}]
+    assert risultato == {"40": "ripristinato", "41": "nessuno_snapshot"}

@@ -245,11 +245,15 @@ def aggiorna_seo_prodotto(
     titolo_seo: str,
     meta_description: str,
     parola_chiave_focus: str,
+    origine: str = "",
 ) -> dict:
     """Scrive titolo SEO, meta description e parola chiave focus di un prodotto
     (sovrascrive i valori esistenti). Restituisce prima/dopo per controllo,
     perché l'effetto è pubblico (quello che Google mostra in SERP). Invalida
-    anche la cache del sito.
+    anche la cache del sito. Il plugin conserva i valori precedenti alla prima
+    modifica: l'utente li ritrova nella tab SEO e puoi rimetterli con
+    ripristina_seo_prodotti. Se i testi si ispirano a un concorrente, passa in
+    `origine` il suo sito (es. "concorrente tomatosmartphone.it").
 
     Se i testi nascono da un'analisi di un sito concorrente (analizza_seo_sito o
     analizza_pagine_salvate), PRIMA di chiamare questo tool: controllali con
@@ -258,9 +262,22 @@ def aggiorna_seo_prodotto(
     scelta. Il punteggio e' un riferimento, la responsabilita' e' sua.
     """
     risultato = seo_tools.aggiorna_seo_prodotto(
-        prodotto_id, titolo_seo, meta_description, parola_chiave_focus
+        prodotto_id, titolo_seo, meta_description, parola_chiave_focus, origine
     )
     return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def ripristina_seo_prodotti(prodotto_ids: list[int]) -> dict:
+    """Rimette titolo SEO, meta description e parola chiave focus di uno o più
+    prodotti come erano prima del primo intervento (il plugin li ha conservati).
+    Un prodotto mai modificato non viene toccato. Restituisce l'esito per ogni
+    id: "ripristinato", "nessuno_snapshot" o "non_trovato". Invalida anche la
+    cache del sito. Usalo solo su richiesta dell'utente: sovrascrive i testi
+    attuali.
+    """
+    risultato = seo_tools.ripristina_seo_prodotti(prodotto_ids)
+    return {"esiti": risultato, **cache_tools.purga_cache()}
 
 
 @mcp.tool()
