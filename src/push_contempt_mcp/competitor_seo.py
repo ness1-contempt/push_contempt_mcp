@@ -497,7 +497,8 @@ class _Estrattore(HTMLParser):
             self._titolo_aperto = tag
             self._buffer_titolo_h = []
         elif tag == "h3":
-            self.n_h3 += 1
+            if self._nel_contenuto():  # gli H3 di menu e footer non fanno parte della gerarchia
+                self.n_h3 += 1
         elif tag == "head":
             self._in_head = True
         if tag == "script" and "ld+json" in a.get("type", "").lower():

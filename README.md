@@ -138,7 +138,9 @@ Copia `.env.example` in `.env` e compila:
   tecnici) e complessivo, con la prova di ogni criterio. Dice se il sito è un buon modello
   da cui prendere spunto: è solo un riferimento, e un sito scadente può essere buono su
   un'area. Le soglie (lunghezze di titolo e meta, parole minime) sono costanti in testa al
-  modulo. Prima di proporre testi, all'utente vanno mostrati punteggio e aree, e lui decide
+  modulo. Alcuni difetti gravi pongono un **tetto** al voto dell'area (ALT mancante oltre il
+  35% delle immagini: contenuto al massimo 6; H3 senza H2 su più della metà delle pagine:
+  intestazioni al massimo 6); il report mostra ogni tetto con la sua misura e il suo effetto. Prima di proporre testi, all'utente vanno mostrati punteggio e aree, e lui decide
   se e per quali aree usare il sito come ispirazione.
 
 **Manutenzione**

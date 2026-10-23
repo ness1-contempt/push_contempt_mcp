@@ -1547,3 +1547,12 @@ def test_la_valutazione_di_una_pagina_di_categoria_non_penalizza_la_sitemap(monk
 
     criteri = [c["criterio"] for c in report["valutazione"]["aree"]["tecnico"]["criteri"]]
     assert "sitemap" not in criteri and "HTTPS" in criteri
+
+
+def test_gli_h3_di_menu_e_footer_non_contano_per_la_gerarchia():
+    html = (
+        "<html><body><header><h3>Menu</h3></header><h1>Titolo</h1><h2>Sezione</h2><h3>Dettaglio</h3>"
+        "<footer><h3>Contatti</h3><h3>Orari</h3></footer></body></html>"
+    )
+    pagina, _ = _estrai_pagina(html, "https://esempio.it/p/", "prodotto", "esempio.it")
+    assert pagina["n_h3"] == 1  # solo quello del contenuto

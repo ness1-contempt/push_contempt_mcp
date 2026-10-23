@@ -13,6 +13,12 @@ analizzato, e ogni criterio riporta la prova ("titoli fra 30 e 60 caratteri:
 un riferimento per l'utilizzatore, non vincolante: decide lui se e per quali
 aree usare il sito come ispirazione.
 
+Oltre alla media dei criteri ci sono i "tetti": regole esplicite che limitano il voto
+di un'area quando c'e' un difetto grave, qualunque sia la media (immagini senza ALT
+oltre il 35% -> contenuto al massimo 6; H3 senza H2 su piu' della meta' delle pagine ->
+intestazioni al massimo 6). Il report mostra sempre ogni tetto con la sua misura, anche
+quando non scatta, e l'effetto che ha avuto. Le soglie sono costanti in testa al modulo.
+
 Cosa NON misura: posizionamento, autorevolezza, velocita', qualita' dei testi
 (solo struttura e quantita'). Funzioni pure: nessuna rete.
 """
@@ -46,6 +52,13 @@ SIGNIFICATO = {
     9: "Eccellente: modello su quasi tutti i punti misurati.",
 }
 
+# Tetti: un difetto grave limita il voto di un'area, qualunque sia la media dei criteri.
+# Il report li mostra sempre (regola, misura, se scatta e con quale effetto).
+ALT_MANCANTE_OLTRE = 0.35  # quota di immagini senza ALT oltre la quale scatta il tetto
+TETTO_ALT = 6  # voto massimo dell'area contenuto
+PAGINE_H3_SENZA_H2_OLTRE = 0.5  # quota di pagine con H3 ma senza H2 oltre la quale scatta
+TETTO_GERARCHIA = 6  # voto massimo dell'area intestazioni
+
 PAGINE_MINIME = 5  # sotto questo numero di pagine il punteggio complessivo non e' significativo
 
 LIMITI = (
@@ -67,14 +80,32 @@ def _quota(parte: int, totale: int) -> float:
     return parte / totale if totale else 0.0
 
 
-def _area(criteri: list[dict]) -> dict:
-    """Punteggio 0-9 dell'area: media pesata dei criteri. Senza criteri
-    misurabili l'area non ha punteggio."""
+def _tetto(regola: str, misura: str, scatta: bool, voto_massimo: int) -> dict:
+    return {"regola": regola, "misura": misura, "scatta": scatta, "voto_massimo": voto_massimo}
+
+
+def _area(criteri: list[dict], tetti: list[dict] | None = None) -> dict:
+    """Punteggio 0-9 dell'area: media pesata dei criteri, poi limitata dai tetti che
+    scattano (non possono mai alzarlo). Senza criteri misurabili l'area non ha punteggio."""
     if not criteri:
         return {"punteggio": None, "criteri": [], "nota": "Non misurabile con i dati raccolti."}
     peso = sum(c["peso"] for c in criteri)
-    punteggio = round(9 * sum(c["valore"] * c["peso"] for c in criteri) / peso)
-    return {"punteggio": punteggio, "criteri": criteri}
+    media = round(9 * sum(c["valore"] * c["peso"] for c in criteri) / peso)
+    punteggio = media
+    for tetto in tetti or []:
+        if tetto["scatta"]:
+            punteggio = min(punteggio, tetto["voto_massimo"])
+            tetto["effetto"] = (
+                f"abbassa il voto da {media} a {tetto['voto_massimo']}"
+                if media > tetto["voto_massimo"]
+                else "nessun effetto: il voto era gia' dentro il limite"
+            )
+    area: dict = {"punteggio": punteggio, "criteri": criteri}
+    if tetti:
+        area["tetti"] = tetti
+    if punteggio != media:
+        area["punteggio_prima_dei_tetti"] = media
+    return area
 
 
 def _per_tipo(pagine: list[dict], *tipi: str) -> list[dict]:
@@ -365,6 +396,36 @@ def _tecnico(pagine: list[dict], sitemap_trovata: bool | None, https: bool | Non
     ]
 
 
+def _tetti_intestazioni(pagine: list[dict]) -> list[dict]:
+    if not pagine:
+        return []
+    salti = sum(p["n_h3"] > 0 and not p["h2"] for p in pagine)
+    return [
+        _tetto(
+            f"H3 senza H2 su oltre il {round(100 * PAGINE_H3_SENZA_H2_OLTRE)}% delle pagine "
+            "(salto nella gerarchia delle intestazioni)",
+            f"pagine con H3 ma senza H2: {salti} su {len(pagine)}",
+            salti > PAGINE_H3_SENZA_H2_OLTRE * len(pagine),
+            TETTO_GERARCHIA,
+        )
+    ]
+
+
+def _tetti_contenuto(pagine: list[dict]) -> list[dict]:
+    immagini = sum(p["immagini"] for p in pagine)
+    if not immagini:
+        return []
+    senza_alt = sum(p["immagini_senza_alt"] for p in pagine)
+    return [
+        _tetto(
+            f"immagini senza ALT oltre il {round(100 * ALT_MANCANTE_OLTRE)}%",
+            f"immagini senza ALT: {senza_alt} su {immagini} ({round(100 * senza_alt / immagini)}%)",
+            senza_alt > ALT_MANCANTE_OLTRE * immagini,
+            TETTO_ALT,
+        )
+    ]
+
+
 # --- insieme ----------------------------------------------------------------
 
 
@@ -374,9 +435,9 @@ def valuta(pagine: list[dict], sitemap_trovata: bool | None, https: bool | None)
     aree = {
         "titoli": _area(_titoli(pagine)),
         "meta_description": _area(_meta(pagine)),
-        "intestazioni": _area(_intestazioni(pagine)),
+        "intestazioni": _area(_intestazioni(pagine), _tetti_intestazioni(pagine)),
         "dati_strutturati": _area(_dati_strutturati(pagine)),
-        "contenuto": _area(_contenuto(pagine)),
+        "contenuto": _area(_contenuto(pagine), _tetti_contenuto(pagine)),
         "tecnico": _area(_tecnico(pagine, sitemap_trovata, https)),
     }
     misurate = {nome: area for nome, area in aree.items() if area["punteggio"] is not None}

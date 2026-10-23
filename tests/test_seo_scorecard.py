@@ -13,6 +13,7 @@ def pagina(tipo="prodotto", i=0, **campi):
         ),
         "h1": [f"Modello {i}"],
         "h2": ["Caratteristiche"],
+        "n_h3": 0,
         "dati_strutturati": ["Product", "Offer", "BreadcrumbList"],
         "dati_prodotto": {"descrizione": "Un telefono", "con_valutazioni": True},
         "struttura": {"paragrafi": 5, "voci_di_elenco": 6, "tabelle_o_liste_specifiche": 1},
@@ -214,3 +215,101 @@ def test_campione_troppo_piccolo_non_da_il_punteggio_complessivo_ma_le_aree_rest
 
     solo_home_molte = valuta([pagina("home", i) for i in range(8)], True, True)
     assert solo_home_molte["punteggio"] is None  # tante pagine, ma nessuna scheda
+
+
+# --- tetti: un difetto grave limita il voto dell'area ----------------------
+
+
+def _contenuto(pagine):
+    return valuta(pagine, True, True)["aree"]["contenuto"]
+
+
+def _intestazioni(pagine):
+    return valuta(pagine, True, True)["aree"]["intestazioni"]
+
+
+def test_alt_mancante_oltre_il_35_percento_limita_il_contenuto_a_6():
+    # 10 pagine con 10 immagini ciascuna: 4 su 10 senza ALT = 40% > 35%
+    pagine = [pagina("prodotto", i, immagini=10, immagini_senza_alt=4) for i in range(10)]
+    area = _contenuto(pagine)
+
+    assert area["punteggio"] == 6
+    assert area["punteggio_prima_dei_tetti"] > 6  # senza il tetto sarebbe piu' alto
+    [tetto] = area["tetti"]
+    assert tetto["scatta"] is True and tetto["voto_massimo"] == 6
+    assert tetto["misura"] == "immagini senza ALT: 40 su 100 (40%)"
+    assert tetto["effetto"].startswith("abbassa il voto da ")
+
+
+def test_alt_mancante_esattamente_al_35_percento_non_fa_scattare_il_tetto():
+    pagine = [pagina("prodotto", i, immagini=20, immagini_senza_alt=7) for i in range(5)]  # 35%
+    area = _contenuto(pagine)
+
+    assert area["tetti"][0]["scatta"] is False
+    assert "effetto" not in area["tetti"][0]
+    assert "punteggio_prima_dei_tetti" not in area
+    assert area["punteggio"] >= 8
+
+
+def test_il_tetto_non_alza_mai_un_voto_gia_basso():
+    vuota = {"paragrafi": 0, "voci_di_elenco": 0, "tabelle_o_liste_specifiche": 0}
+    pagine = [
+        pagina(
+            "prodotto",
+            i,
+            immagini=10,
+            immagini_senza_alt=10,
+            parole_proprie=5,
+            righe_scheda=0,
+            struttura=vuota,
+        )
+        for i in range(6)
+    ]
+    area = _contenuto(pagine)
+
+    assert area["punteggio"] < 6  # gia' sotto il limite del tetto
+    [tetto] = area["tetti"]
+    assert tetto["scatta"] is True
+    assert tetto["effetto"].startswith("nessun effetto")
+    assert "punteggio_prima_dei_tetti" not in area
+
+
+def test_h3_senza_h2_su_piu_della_meta_delle_pagine_limita_le_intestazioni_a_6():
+    # 6 pagine su 10 con H3 ma senza H2 (60% > 50%)
+    pagine = [pagina("prodotto", i, n_h3=3, h2=[]) for i in range(6)]
+    pagine += [pagina("prodotto", i, n_h3=3, h2=["Dettagli"]) for i in range(6, 10)]
+    area = _intestazioni(pagine)
+
+    assert area["punteggio"] == 6
+    [tetto] = area["tetti"]
+    assert tetto["scatta"] is True
+    assert tetto["misura"] == "pagine con H3 ma senza H2: 6 su 10"
+    assert "salto nella gerarchia" in tetto["regola"]
+
+
+def test_h3_senza_h2_su_meta_esatta_delle_pagine_non_fa_scattare_il_tetto():
+    pagine = [pagina("prodotto", i, n_h3=3, h2=[]) for i in range(5)]
+    pagine += [pagina("prodotto", i, n_h3=3, h2=["Dettagli"]) for i in range(5, 10)]
+    area = _intestazioni(pagine)
+
+    assert area["tetti"][0]["scatta"] is False
+    assert area["punteggio"] >= 8
+
+
+def test_senza_h3_nessun_tetto_sulla_gerarchia_anche_senza_h2():
+    pagine = [pagina("prodotto", i, n_h3=0, h2=[]) for i in range(10)]  # nessun H3: niente salto
+    area = _intestazioni(pagine)
+    assert area["tetti"][0]["scatta"] is False
+    assert area["tetti"][0]["misura"] == "pagine con H3 ma senza H2: 0 su 10"
+
+
+def test_i_tetti_pesano_sul_punteggio_complessivo():
+    buoni = valuta(sito_buono(), True, True)
+    con_difetti = valuta(
+        [{**p, "immagini": 10, "immagini_senza_alt": 5, "n_h3": 2, "h2": []} for p in sito_buono()],
+        True,
+        True,
+    )
+    assert con_difetti["aree"]["contenuto"]["punteggio"] == 6
+    assert con_difetti["aree"]["intestazioni"]["punteggio"] == 6
+    assert con_difetti["punteggio"] < buoni["punteggio"]
