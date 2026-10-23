@@ -130,6 +130,14 @@ Copia `.env.example` in `.env` e compila:
   sono elencati e il giudizio finale resta all'utilizzatore. Il punteggio è solo
   un riferimento, non vincolante: va mostrato all'utente e il livello accettato
   scelto da lui prima di applicare qualsiasi modifica ai prodotti.
+- La `valutazione` che `analizza_seo_sito` e `analizza_pagine_salvate` aggiungono al report
+  (modulo `seo_scorecard.py`) dà alla struttura SEO del sito analizzato un punteggio da 0 a 9
+  per area (titoli, meta description, intestazioni, dati strutturati, contenuto, aspetti
+  tecnici) e complessivo, con la prova di ogni criterio. Dice se il sito è un buon modello
+  da cui prendere spunto: è solo un riferimento, e un sito scadente può essere buono su
+  un'area. Le soglie (lunghezze di titolo e meta, parole minime) sono costanti in testa al
+  modulo. Prima di proporre testi, all'utente vanno mostrati punteggio e aree, e lui decide
+  se e per quali aree usare il sito come ispirazione.
 
 **Manutenzione**
 - `purga_cache_sito` — invalida manualmente la cache del sito (gli altri
@@ -158,6 +166,7 @@ Copia `.env.example` in `.env` e compila:
 - `src/push_contempt_mcp/catalog_health.py` — salute catalogo: client REST
 - `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast: client REST
 - `src/push_contempt_mcp/competitor_seo.py` — scarico e campione di pagine di un sito concorrente, campi SEO (solo libreria standard + `requests`)
+- `src/push_contempt_mcp/seo_scorecard.py` — valutazione 0-9 per area della struttura SEO di un sito analizzato
 - `src/push_contempt_mcp/text_similarity.py` — controllo di somiglianza 0-9 fra un nostro testo e quelli analizzati (cache locale dei testi dei concorrenti)
 - `src/push_contempt_mcp/competitor_text.py` — analisi del testo di quelle pagine: template, vocabolario, segnali di stile e intenzione
 - `src/push_contempt_mcp/product_sync.py` — scansione cartella prodotti locale (lettura diretta dal DB, solo confronto nomi)

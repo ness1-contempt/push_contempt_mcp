@@ -1168,3 +1168,45 @@ def test_browser_non_disponibile_da_un_errore_chiaro(monkeypatch):
     monkeypatch.setattr(competitor_seo, "_risolvi", lambda host: ["93.184.216.34"])
     with pytest.raises(ErroreAnalisi, match="Browser non disponibile"):
         competitor_seo._Browser().scarica("https://esempio.it/", "esempio.it")
+
+
+def test_il_report_include_la_valutazione_per_area(monkeypatch):
+    _sito_finto(monkeypatch, _negozio_finto())
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    valutazione = report["valutazione"]
+    assert 0 <= valutazione["punteggio"] <= 9
+    assert set(valutazione["aree"]) == {
+        "titoli",
+        "meta_description",
+        "intestazioni",
+        "dati_strutturati",
+        "contenuto",
+        "tecnico",
+    }
+    assert valutazione["pagine_valutate"] == len(report["pagine"])
+    assert "non e' vincolante" in valutazione["nota"]
+    criteri_tecnici = [c["criterio"] for c in valutazione["aree"]["tecnico"]["criteri"]]
+    assert "sitemap" in criteri_tecnici and "HTTPS" in criteri_tecnici
+    # le prove sono quelle dei dati: titoli tutti diversi, ma di 28 caratteri (sotto i 30)
+    n = len(report["pagine"])
+    prove = {c["criterio"]: c["evidenza"] for c in valutazione["aree"]["titoli"]["criteri"]}
+    assert prove["titoli diversi fra loro"] == f"titoli distinti: {n} su {n}"
+    assert "titoli fra 30 e 60 caratteri: 0 su" in prove["lunghezza adatta"]
+
+
+def test_la_valutazione_delle_pagine_salvate_salta_sitemap_e_https(tmp_path):
+    report = competitor_seo.analizza_pagine_salvate([str(_cartella_pagine(tmp_path))])
+
+    criteri_tecnici = [c["criterio"] for c in report["valutazione"]["aree"]["tecnico"]["criteri"]]
+    assert "sitemap" not in criteri_tecnici and "HTTPS" not in criteri_tecnici
+    assert "indirizzo canonico" in criteri_tecnici
+
+
+def test_le_parole_proprie_escludono_il_template(monkeypatch):
+    _sito_finto(monkeypatch, _negozio_finto())
+    report = analizza_seo_sito("https://esempio.it")
+    # il paragrafo proprio ha 9 parole: la frase di spedizione (template) non conta
+    prodotto = next(p for p in report["pagine"] if p["url"].endswith("telefono-1/"))
+    assert prodotto["n_parole"] > 9

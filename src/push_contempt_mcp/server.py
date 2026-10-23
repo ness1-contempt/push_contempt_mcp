@@ -314,6 +314,13 @@ def analizza_seo_sito(
     `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
     I testi analizzati restano salvati in locale per controlla_somiglianza.
 
+    Il report ha una `valutazione` della struttura SEO del sito da 0 a 9, per area
+    (titoli, meta description, intestazioni, dati strutturati, contenuto, aspetti
+    tecnici) e complessiva, con la prova di ogni criterio: dice se il sito e' un buon
+    modello. E' SOLO UN RIFERIMENTO: un sito scadente puo' essere buono su un'area.
+    Prima di proporre testi ispirati al sito, mostra all'utente punteggio e aree e
+    chiedigli se vuole usarlo come ispirazione e per quali aree; non decidere tu.
+
     `usa_curl`: fa le richieste con il programma curl invece che con la libreria
     Python (stesso User-Agent dichiarato, stesso rispetto di robots.txt, pause e
     Retry-After: se il sito risponde ancora 429 si ferma). Usalo SOLO se l'utente

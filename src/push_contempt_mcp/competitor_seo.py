@@ -44,7 +44,7 @@ from urllib.robotparser import RobotFileParser
 
 import requests
 
-from push_contempt_mcp import competitor_text, text_similarity
+from push_contempt_mcp import competitor_text, seo_scorecard, text_similarity
 
 USER_AGENT_TOKEN = "push_contempt_mcp-seo"
 USER_AGENT = f"{USER_AGENT_TOKEN}/0.1 (+https://github.com/ness1-contempt/push_contempt_mcp)"
@@ -963,9 +963,12 @@ def _chiudi_analisi(
     urls_in_sitemap: dict[str, int],
     avvisi: list[str],
     max_caratteri: int,
+    in_rete: bool = True,
 ) -> dict:
     """Parte comune a analizza_seo_sito e analizza_pagine_salvate: analisi del
-    testo, salvataggio dei testi per controlla_somiglianza e costruzione del report."""
+    testo, valutazione della struttura SEO, salvataggio dei testi per
+    controlla_somiglianza e costruzione del report. `in_rete` e' False per le
+    pagine salvate, dove sitemap e HTTPS non sono verificabili."""
     avviso_identiche = _avviso_pagine_identiche(pagine)
     if avviso_identiche:
         avvisi.append(avviso_identiche)
@@ -982,6 +985,16 @@ def _chiudi_analisi(
         origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, testo, max_caratteri
     )
     report["controllo_somiglianza"] = confronto
+    report["valutazione"] = seo_scorecard.valuta(
+        pagine,
+        sitemap is not None if in_rete else None,
+        origine.startswith("https://") if in_rete else None,
+    )
+    report["valutazione"]["nota"] = (
+        "Il punteggio e' solo un riferimento per l'utilizzatore, non e' vincolante. Prima di "
+        "proporre testi ispirati a questo sito, mostragli punteggio e aree e chiedigli se vuole "
+        "usarlo come ispirazione, e per quali aree."
+    )
     return report
 
 
@@ -1224,7 +1237,7 @@ def _analizza_salvate(percorsi: list[str], sito: str, max_caratteri: int) -> dic
     for home in (p for p in pagine if p["tipo"] == "home"):
         avvisi.extend(_avviso_javascript(home))
     origine = origine or sito.strip() or "pagine_salvate"
-    return _chiudi_analisi(origine, pagine, [], None, {}, avvisi, max_caratteri)
+    return _chiudi_analisi(origine, pagine, [], None, {}, avvisi, max_caratteri, in_rete=False)
 
 
 def analizza_pagine_salvate(

@@ -291,6 +291,7 @@ def analizza_testi(pagine: list[dict], max_caratteri: int) -> dict:
         pagina["estratto"] = estratto(propri, max_caratteri, titoli)
         pagina["_segnali"] = segnali_pagina(blocchi, propri)
         pagina["_testo_proprio"] = "\n".join(propri)
+        pagina["parole_proprie"] = len(pagina["_testo_proprio"].split())
 
     per_tipo = {}
     for tipo in ("categoria", "prodotto"):
