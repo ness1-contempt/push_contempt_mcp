@@ -276,13 +276,66 @@ def test_estrai_pagina_campi_seo():
     assert pagina["link_interni"] == 4
 
 
-def test_estrai_pagina_conta_solo_le_parole_del_contenuto_e_non_le_restituisce():
+def test_estrai_pagina_conta_le_parole_del_contenuto_e_ne_tiene_i_blocchi():
     pagina, _ = _estrai_pagina(PAGINA, "https://esempio.it/p/", "prodotto", "esempio.it")
 
     # h1 (3) + h2 x2 (4) + h3 (1) + paragrafo (11) + testi dei link in main (7) = 26: niente
     # menu, script, footer, titolo
     assert pagina["n_parole"] == 26
-    assert not any("batteria" in str(valore) for valore in pagina.values())
+    # Il testo resta nei blocchi interni, dopo l'H1: niente menu, footer, titolo.
+    blocchi = pagina["_blocchi"]
+    assert "Un telefono con display luminoso e batteria che dura due giorni." in blocchi
+    assert blocchi[0] == "Scheda tecnica"
+    assert not any("menu" in b or "Copyright" in b or "Smartphone" in b for b in blocchi)
+
+
+PAGINA_STRUTTURA = """<html><head><title>X</title>
+<script type="application/ld+json">{"@type": "Product", "name": "X",
+ "description": "  Descrizione   dal markup. ", "brand": {"@type": "Brand", "name": "Nothing"},
+ "offers": [{"@type": "Offer", "availability": "https://schema.org/InStock"}],
+ "aggregateRating": {"ratingValue": 4.5}}</script></head>
+<body><h1>X</h1>
+<p>Un <strong>telefono</strong> con <a href="/x">schermo</a> grande.</p>
+<ul><li>Uno</li><li>Due</li></ul>
+<table><tr><td>RAM</td><td>12 GB</td></tr></table>
+<iframe src="https://www.youtube.com/embed/abc"></iframe></body></html>"""
+
+
+def test_estrai_pagina_i_tag_in_linea_restano_nello_stesso_blocco():
+    pagina, _ = _estrai_pagina(PAGINA_STRUTTURA, "https://esempio.it/p/", "prodotto", "esempio.it")
+    assert pagina["_blocchi"] == [
+        "Un telefono con schermo grande.",
+        "Uno",
+        "Due",
+        "RAM",
+        "12 GB",
+    ]
+
+
+def test_estrai_pagina_struttura_e_dati_prodotto():
+    pagina, _ = _estrai_pagina(PAGINA_STRUTTURA, "https://esempio.it/p/", "prodotto", "esempio.it")
+    assert pagina["struttura"] == {
+        "paragrafi": 1,
+        "voci_di_elenco": 2,
+        "tabelle_o_liste_specifiche": 1,
+        "video": 1,
+    }
+    assert pagina["dati_prodotto"] == {
+        "descrizione": "Descrizione dal markup.",
+        "marca": "Nothing",
+        "con_valutazioni": True,
+        "disponibilita": "InStock",
+    }
+
+
+def test_estrai_pagina_senza_h1_usa_tutto_il_testo_e_senza_product_non_ha_dati_prodotto():
+    html = (
+        "<html><head><title>T</title></head>"
+        "<body><p>Solo un paragrafo qualunque qui.</p></body></html>"
+    )
+    pagina, _ = _estrai_pagina(html, "https://esempio.it/", "home", "esempio.it")
+    assert pagina["_blocchi"] == ["Solo un paragrafo qualunque qui."]
+    assert pagina["dati_prodotto"] == {}
 
 
 def test_tipi_schema_ignora_json_malformato():
@@ -317,11 +370,18 @@ def test_schema_titolo_riconosce_separatore_e_brand():
 # --- flusso completo --------------------------------------------------------
 
 
-def _pagina_html(titolo, h1, h2=("Caratteristiche", "Spedizione"), schema="Product"):
+SPEDIZIONE = "Spedizione gratuita in 24 ore per tutti gli ordini."
+
+
+def _pagina_html(titolo, h1, h2=("Caratteristiche", "Pagamento"), schema="Product"):
+    """Pagina con un paragrafo proprio (diverso per ogni titolo) e una frase di
+    template identica su tutte le pagine."""
     return f"""<html lang="it"><head><title>{titolo} | Negozio Esempio</title>
 <meta name="description" content="Descrizione di {titolo} con tutte le informazioni utili.">
 <script type="application/ld+json">{{"@type": "{schema}"}}</script></head>
-<body><h1>{h1}</h1>{"".join(f"<h2>{t}</h2>" for t in h2)}<p>Testo segreto del concorrente.</p>
+<body><h1>{h1}</h1>{"".join(f"<h2>{t}</h2>" for t in h2)}
+<p>Il {titolo} offre una descrizione propria con dettagli unici.</p>
+<p>{SPEDIZIONE}</p>
 <img src="a.jpg" alt="foto"></body></html>"""
 
 
@@ -385,13 +445,47 @@ def test_analizza_seo_sito_costruisce_il_report(monkeypatch):
     assert prodotti["dati_strutturati"] == {"Product": 9}
     assert {"testo": "caratteristiche", "pagine": 9} in prodotti["h2_ricorrenti"]
     assert report["riepilogo_per_tipo"]["categoria"]["dati_strutturati"] == {"CollectionPage": 3}
-    assert {"termine": "negozio", "pagine": 13} in report["parole_ricorrenti"]
-    assert "non copiare" in report["nota_uso"]
+    assert {"termine": "negozio", "pagine": 13} in report["parole_nei_titoli"]
+    assert "originali" in report["nota_uso"]
 
 
-def test_il_report_non_contiene_il_testo_delle_pagine(monkeypatch):
+def test_il_report_ha_estratti_vocabolario_e_stile_senza_il_template(monkeypatch):
     _sito_finto(monkeypatch, _negozio_finto())
-    assert "segreto" not in str(analizza_seo_sito("https://esempio.it"))
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    prodotti = [p for p in report["pagine"] if p["tipo"] == "prodotto"]
+    assert len(prodotti) == 9
+    for pagina in prodotti:
+        assert "descrizione propria con dettagli unici" in pagina["estratto"]
+        assert "Spedizione gratuita" not in pagina["estratto"]  # e' template, non contenuto
+    # la frase ripetuta ovunque diventa un messaggio del sito
+    assert report["messaggi_ripetuti_sul_sito"] == [{"testo": SPEDIZIONE.lower(), "pagine": 12}]
+    vocabolario = report["riepilogo_per_tipo"]["prodotto"]["vocabolario"]
+    assert {"termine": "dettagli", "pagine": 9} in vocabolario["termini"]
+    assert {"coppia": "descrizione propria", "pagine": 9} in vocabolario["coppie_di_parole"]
+    assert "spedizione" not in [v["termine"] for v in vocabolario["termini"]]
+    stile = report["riepilogo_per_tipo"]["prodotto"]["stile_e_intenzione"]
+    # la spedizione gratuita nel template conta comunque come messaggio di servizio
+    assert stile["ogni_1000_parole"]["fiducia_e_servizio"] > 0
+    assert stile["ogni_1000_parole"]["inviti_all_azione"] == 0
+    assert stile["lunghezza_media_frase_in_parole"] > 0
+
+
+def test_caratteri_per_pagina_limita_o_toglie_gli_estratti(monkeypatch):
+    _sito_finto(monkeypatch, _negozio_finto())
+
+    corto = analizza_seo_sito("https://esempio.it", caratteri_per_pagina=20)
+    estratti = [p["estratto"] for p in corto["pagine"] if p["estratto"]]
+    assert estratti and all(len(e) <= 21 for e in estratti)  # 20 + "…"
+
+    nessuno = analizza_seo_sito("https://esempio.it", caratteri_per_pagina=0)
+    assert all(p["estratto"] == "" for p in nessuno["pagine"])
+    # vocabolario e stile restano: il testo si analizza comunque
+    assert nessuno["riepilogo_per_tipo"]["prodotto"]["vocabolario"]["termini"]
+
+    tetto = analizza_seo_sito("https://esempio.it", caratteri_per_pagina=10**6)
+    assert all(len(p["estratto"]) <= competitor_seo.TETTO_CARATTERI + 1 for p in tetto["pagine"])
 
 
 def test_analizza_seo_sito_rispetta_i_limiti_e_il_tetto(monkeypatch):

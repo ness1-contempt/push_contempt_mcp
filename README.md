@@ -95,13 +95,20 @@ Copia `.env.example` in `.env` e compila:
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).
 - `analizza_seo_sito` — analisi a campione del sito di un altro negozio per
-  prendere spunto dai suoi schemi SEO (home, sitemap, qualche categoria,
-  una decina di prodotti): struttura e lunghezze di titoli e meta
-  description, H1/H2 ricorrenti, dati strutturati, parole chiave. Gira sul
-  tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
-  richieste, non esegue JavaScript e del testo delle pagine restituisce solo
-  il conteggio parole (spunto sugli schemi, non da copiare). Rifiuta reti
-  private; per provarlo su un sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`.
+  capire come è fatta la sua SEO e come descrive i prodotti (home, sitemap,
+  qualche categoria, una decina di prodotti). Oltre ai campi SEO (titoli,
+  meta description, H1/H2, dati strutturati) analizza il testo: vocabolario
+  (parole e coppie di parole ricorrenti, unità di misura), segnali di stile
+  e intenzione ogni 1000 parole (inviti all'acquisto, fiducia e servizio,
+  offerte, confronto e guida, tono "tu"/"noi", tecnicismo, lunghezza delle
+  frasi), struttura delle descrizioni e un breve estratto per pagina
+  (`caratteri_per_pagina`, 600 di default: è quello che pesa sui token), così
+  l'assistente giudica intenzione e tono. Le formule ripetute su tutto il sito
+  (spedizioni, resi, "aggiungi al carrello") sono separate dai contenuti. Gira
+  sul tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
+  richieste e non esegue JavaScript. Rifiuta reti private; per provarlo su un
+  sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`. Vocabolario ed estratti
+  servono ad analizzare: i testi nostri vanno scritti con parole proprie.
 
 **Manutenzione**
 - `purga_cache_sito` — invalida manualmente la cache del sito (gli altri
@@ -129,7 +136,8 @@ Copia `.env.example` in `.env` e compila:
 - `src/push_contempt_mcp/sales_tools.py` — report vendite: client REST
 - `src/push_contempt_mcp/catalog_health.py` — salute catalogo: client REST
 - `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast: client REST
-- `src/push_contempt_mcp/competitor_seo.py` — analisi SEO a campione del sito di un concorrente (solo libreria standard + `requests`)
+- `src/push_contempt_mcp/competitor_seo.py` — scarico e campione di pagine di un sito concorrente, campi SEO (solo libreria standard + `requests`)
+- `src/push_contempt_mcp/competitor_text.py` — analisi del testo di quelle pagine: template, vocabolario, segnali di stile e intenzione
 - `src/push_contempt_mcp/product_sync.py` — scansione cartella prodotti locale (lettura diretta dal DB, solo confronto nomi)
 - `src/push_contempt_mcp/browser_tools.py` — automazione Playwright per le operazioni ancora manuali (prezzo singolo con anteprima, SEO categoria)
 - `src/push_contempt_mcp/cache_tools.py` — invalidazione cache del sito dopo una scrittura

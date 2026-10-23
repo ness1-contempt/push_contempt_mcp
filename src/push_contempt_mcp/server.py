@@ -262,28 +262,41 @@ def leggi_analisi_seo_yoast(prodotto_id: int) -> dict:
 
 
 @mcp.tool()
-def analizza_seo_sito(url: str, max_categorie: int = 3, max_prodotti: int = 10) -> dict:
-    """Analizza a campione la SEO del sito di un altro negozio (di norma un
-    concorrente) per prendere SPUNTO dai suoi schemi: scarica la home, la
-    sitemap, qualche categoria e una decina di prodotti e restituisce un
-    report compatto (struttura e lunghezze di titoli e meta description,
-    H1/H2 ricorrenti, dati strutturati, parole chiave ricorrenti, qualita'
-    degli ALT) piu' le singole pagine analizzate.
+def analizza_seo_sito(
+    url: str,
+    max_categorie: int = 3,
+    max_prodotti: int = 10,
+    caratteri_per_pagina: int = 600,
+) -> dict:
+    """Analizza a campione il sito di un altro negozio (di norma un concorrente)
+    per capire come e' fatta la sua SEO e come descrive i prodotti: scarica la
+    home, la sitemap, qualche categoria e una decina di prodotti (dura qualche
+    decina di secondi: rispetta robots.txt e fa pause fra le richieste).
 
-    Rispetta robots.txt, si presenta con uno User-Agent riconoscibile e fa
-    una pausa fra le richieste (l'analisi dura qualche decina di secondi).
-    Non esegue JavaScript: se il sito costruisce le pagine cosi', il report
-    lo segnala fra gli `avvisi`. Rifiuta indirizzi di reti private. Del testo
-    delle pagine restituisce solo il conteggio parole.
+    Il report contiene, oltre ai campi SEO (titoli, meta description, H1/H2,
+    dati strutturati, ALT), il TESTO analizzato: vocabolario (parole e coppie
+    di parole ricorrenti, unita' di misura), segnali di stile e intenzione ogni
+    1000 parole (inviti all'acquisto, fiducia e servizio, offerte, confronto e
+    guida, tono "tu" o "noi", tecnicismo, lunghezza delle frasi), struttura
+    delle descrizioni (paragrafi, elenchi, tabelle, video), i messaggi che il
+    sito ripete ovunque (spedizione, resi, inviti) e, per ogni pagina, un
+    breve `estratto` della descrizione. Non esegue JavaScript: se il sito
+    costruisce le pagine cosi' o serve pagine segnaposto, lo dice negli `avvisi`.
+    Rifiuta indirizzi di reti private.
 
-    Usa il report come ispirazione sugli schemi (come sono fatti i titoli, quali
-    temi trattano, che struttura usano), MAI per copiare titoli, description o
-    descrizioni del concorrente, e scrivi solo cose vere sui nostri prodotti.
-    I testi proposti vanno poi applicati con i tool SEO esistenti
+    COME USARLO: dal report ricava tu l'intenzione (informativa, comparativa,
+    d'acquisto), il tono, cosa il sito enfatizza e come struttura le descrizioni,
+    quali termini e misure usa per la categoria. Poi scrivi testi ORIGINALI per
+    i nostri prodotti, con parole tue: gli estratti servono ad analizzare, non
+    a riusare. Mai copiare frasi, titoli o description del concorrente, e solo
+    cose vere sui nostri prodotti. I testi vanno poi applicati con i tool SEO
     (aggiorna_seo_prodotto, crea_prodotto), mostrando prima l'anteprima.
+
+    `caratteri_per_pagina` e' la lunghezza dell'estratto di ogni pagina (0 =
+    nessun estratto, massimo 2000): e' quello che pesa sui token del report.
     `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
     """
-    return competitor_seo.analizza_seo_sito(url, max_categorie, max_prodotti)
+    return competitor_seo.analizza_seo_sito(url, max_categorie, max_prodotti, caratteri_per_pagina)
 
 
 @mcp.tool()

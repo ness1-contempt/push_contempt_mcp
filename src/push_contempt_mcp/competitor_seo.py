@@ -1,11 +1,13 @@
-"""Analisi SEO "a campione" del sito di un altro negozio, per prendere spunto
-dagli schemi che usa (struttura dei titoli, lunghezze, temi, dati strutturati).
+"""Analisi SEO "a campione" del sito di un altro negozio, per prendere spunto da
+come e' fatto: struttura dei titoli, parole usate, modo di descrivere i
+prodotti, intenzione, dati strutturati.
 
 Gira sulla macchina dell'utente, non sul sito WordPress (l'hosting spesso
 blocca le richieste in uscita, vedi Altervista), e senza AI: scarica poche
-pagine, ne estrae i campi SEO con codice normale e restituisce un report
-compatto. Chi lo chiama (l'assistente AI) legge solo il riassunto, quindi il
-costo in token non dipende da quante pagine vengono scaricate.
+pagine, ne estrae i campi SEO e il testo con codice normale e restituisce un
+report compatto. Chi lo chiama (l'assistente AI) legge solo il riassunto, quindi
+il costo in token non dipende da quante pagine vengono scaricate ma da quanto
+testo di esempio si chiede (`caratteri_per_pagina`).
 
 Scelte di progetto:
 - Campione fisso e piccolo (home, sitemap, qualche categoria, una decina di
@@ -13,8 +15,13 @@ Scelte di progetto:
 - Rispetta robots.txt (compreso Crawl-delay), si presenta con uno User-Agent
   riconoscibile, fa una pausa fra una richiesta e l'altra e non esce dal
   dominio indicato.
-- Del testo delle pagine restituisce solo il conteggio parole, mai il
-  contenuto: il report e' uno spunto sugli schemi, non una copia.
+- Il testo conta: oltre ai campi SEO il report ha vocabolario (parole e coppie
+  di parole ricorrenti), segnali di stile e intenzione e un breve estratto
+  della descrizione di ogni pagina, perche' l'assistente giudichi tono e modo
+  di descrivere i prodotti (vedi competitor_text.py). Le formule che si
+  ripetono su meta' delle pagine (template del sito) sono separate dai
+  contenuti. Gli estratti servono ad analizzare, non a riusare: i testi nostri
+  vanno scritti con parole proprie.
 - Rifiuta indirizzi di reti private (localhost, 192.168.x.x, ...) per non
   usare lo strumento contro risorse interne; per provarlo su un sito locale
   impostare SEO_ANALISI_CONSENTI_RETE_PRIVATA=1.
@@ -35,6 +42,8 @@ from urllib.robotparser import RobotFileParser
 
 import requests
 
+from push_contempt_mcp import competitor_text
+
 USER_AGENT_TOKEN = "push_contempt_mcp-seo"
 USER_AGENT = f"{USER_AGENT_TOKEN}/0.1 (+https://github.com/ness1-contempt/push_contempt_mcp)"
 
@@ -49,15 +58,10 @@ MAX_CATEGORIE_DEFAULT = 3
 MAX_PRODOTTI_DEFAULT = 10
 TETTO_CATEGORIE = 10
 TETTO_PRODOTTI = 30
+CARATTERI_DEFAULT = 600
+TETTO_CARATTERI = 2000
 
 _SEPARATORI_TITOLO = (" | ", " - ", " – ", " — ", " • ", " · ")
-_PAROLE_VUOTE = frozenset(
-    "della delle degli dello dell alla alle agli allo come anche con per tra fra che non "
-    "una uno gli del dei nel nei nelle sul sulle questo questa questi queste tutti tutte "
-    "dal dai dalla piu the and for with from your you our this that are not all new "
-    "shop store online home".split()
-)
-
 _FRAGMENT_CATEGORIA = ("/product-category/", "/categoria-prodotto/", "/categoria/", "/category/")
 _FRAGMENT_COLLEZIONE = ("/collections/", "/collection/")
 _FRAGMENT_PRODOTTO = ("/product/", "/products/", "/prodotto/", "/prodotti/")
@@ -207,6 +211,14 @@ class _Estrattore(HTMLParser):
     _IGNORATI = frozenset(
         {"script", "style", "noscript", "template", "nav", "footer", "header", "aside"}
     )
+    # Tag che chiudono un "blocco" di testo (un paragrafo, una voce di elenco, ...):
+    # il testo dei tag in linea (strong, a, span) resta nello stesso blocco.
+    _BLOCCHI = frozenset(
+        "p div li ul ol tr td th table br section article main h1 h2 h3 h4 h5 h6 dt dd dl "
+        "blockquote button figcaption form".split()
+    )
+    _MAX_BLOCCHI = 800
+    _MAX_CARATTERI_BLOCCO = 1500
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -222,17 +234,51 @@ class _Estrattore(HTMLParser):
         self.immagini = 0
         self.immagini_senza_alt = 0
         self.parole = 0
+        self.paragrafi = 0
+        self.voci_elenco = 0
+        self.tabelle = 0
+        self.video = 0
+        self.blocchi: list[str] = []
+        self.blocchi_dopo_h1: list[str] = []
         self._in_titolo = False
         self._titolo_aperto: str | None = None
         self._buffer_titolo: list[str] = []
         self._buffer_titolo_h: list[str] = []
         self._json_ld_aperto = False
         self._buffer_json: list[str] = []
+        self._buffer_blocco: list[str] = []
         self._profondita_ignorata = 0
         self._in_head = False
+        self._h1_visto = False
+
+    def _chiudi_blocco(self):
+        testo = " ".join("".join(self._buffer_blocco).split())
+        self._buffer_blocco = []
+        if not testo or len(self.blocchi) >= self._MAX_BLOCCHI:
+            return
+        testo = testo[: self._MAX_CARATTERI_BLOCCO]
+        self.blocchi.append(testo)
+        if self._h1_visto:
+            self.blocchi_dopo_h1.append(testo)
+
+    def _nel_contenuto(self) -> bool:
+        return not self._in_head and not self._profondita_ignorata
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
+        if tag in self._BLOCCHI or tag in self._IGNORATI:
+            self._chiudi_blocco()
+        if self._nel_contenuto():
+            if tag == "p":
+                self.paragrafi += 1
+            elif tag == "li":
+                self.voci_elenco += 1
+            elif tag in ("table", "dl"):
+                self.tabelle += 1
+            elif tag == "video" or (
+                tag == "iframe" and re.search(r"youtube|vimeo", a.get("src", ""), re.I)
+            ):
+                self.video += 1
         if tag == "html":
             self.lingua = a.get("lang", "")
         elif tag == "title":
@@ -263,6 +309,8 @@ class _Estrattore(HTMLParser):
             self._profondita_ignorata += 1
 
     def handle_endtag(self, tag):
+        if tag in self._BLOCCHI or tag in self._IGNORATI:
+            self._chiudi_blocco()
         if tag == "title":
             self._in_titolo = False
             if not self.titolo:
@@ -272,6 +320,8 @@ class _Estrattore(HTMLParser):
             if testo:
                 (self.h1 if tag == "h1" else self.h2).append(testo)
             self._titolo_aperto = None
+            if tag == "h1":
+                self._h1_visto = True
         elif tag == "head":
             self._in_head = False
         elif tag == "script" and self._json_ld_aperto:
@@ -287,8 +337,13 @@ class _Estrattore(HTMLParser):
             self._buffer_json.append(dati)
         if self._titolo_aperto:
             self._buffer_titolo_h.append(dati)
-        if not self._in_head and not self._profondita_ignorata:
+        if self._nel_contenuto():
             self.parole += len(dati.split())
+            self._buffer_blocco.append(dati)
+
+    def close(self):
+        super().close()
+        self._chiudi_blocco()
 
 
 def _tipi_schema(blocchi_json: list[str]) -> list[str]:
@@ -316,9 +371,57 @@ def _tipi_schema(blocchi_json: list[str]) -> list[str]:
     return sorted(tipi)
 
 
+def _dati_prodotto(blocchi_json: list[str]) -> dict:
+    """Descrizione, marca, valutazioni e disponibilita' dichiarate nel primo
+    JSON-LD di tipo Product (vuoto se non c'e')."""
+
+    def e_prodotto(nodo: dict) -> bool:
+        tipo = nodo.get("@type")
+        return tipo == "Product" or (isinstance(tipo, list) and "Product" in tipo)
+
+    def cerca(nodo):
+        if isinstance(nodo, list):
+            for elemento in nodo:
+                trovato = cerca(elemento)
+                if trovato:
+                    return trovato
+        elif isinstance(nodo, dict):
+            if e_prodotto(nodo):
+                return nodo
+            for figlio in nodo.values():
+                if isinstance(figlio, (dict, list)):
+                    trovato = cerca(figlio)
+                    if trovato:
+                        return trovato
+        return None
+
+    for blocco in blocchi_json:
+        try:
+            nodo = cerca(json.loads(blocco))
+        except ValueError:
+            continue
+        if not nodo:
+            continue
+        marca = nodo.get("brand")
+        if isinstance(marca, dict):
+            marca = marca.get("name")
+        offerte = nodo.get("offers")
+        offerta = offerte[0] if isinstance(offerte, list) and offerte else offerte
+        disponibilita = offerta.get("availability") if isinstance(offerta, dict) else ""
+        descrizione = nodo.get("description")
+        return {
+            "descrizione": " ".join(descrizione.split()) if isinstance(descrizione, str) else "",
+            "marca": marca if isinstance(marca, str) else "",
+            "con_valutazioni": bool(nodo.get("aggregateRating") or nodo.get("review")),
+            "disponibilita": str(disponibilita or "").rsplit("/", 1)[-1],
+        }
+    return {}
+
+
 def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, list[str]]:
-    """Campi SEO di una pagina e URL dei suoi link interni (assoluti, senza
-    ancore). Del testo tiene solo il conteggio parole."""
+    """Campi SEO e testo di una pagina e URL dei suoi link interni (assoluti,
+    senza ancore). Il testo resta nel campo interno `_blocchi` (i blocchi di
+    contenuto, dopo l'H1 se c'e'), che competitor_text.analizza_testi consuma."""
     estrattore = _Estrattore()
     estrattore.feed(testo)
     estrattore.close()
@@ -360,6 +463,14 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
         "immagini_senza_alt": estrattore.immagini_senza_alt,
         "link_interni": len(interni),
         "link_esterni": n_esterni,
+        "struttura": {
+            "paragrafi": estrattore.paragrafi,
+            "voci_di_elenco": estrattore.voci_elenco,
+            "tabelle_o_liste_specifiche": estrattore.tabelle,
+            "video": estrattore.video,
+        },
+        "dati_prodotto": _dati_prodotto(estrattore.json_ld),
+        "_blocchi": estrattore.blocchi_dopo_h1 if estrattore.h1 else estrattore.blocchi,
     }
     return pagina, interni
 
@@ -523,9 +634,34 @@ def _parole_ricorrenti(pagine: list[dict]) -> list[dict]:
     per_pagina: Counter = Counter()
     for pagina in pagine:
         testo = " ".join([pagina["titolo"], *pagina["h1"], *pagina["h2"]]).lower()
-        termini = {t for t in re.findall(r"[a-zàèéìòù0-9]{4,}", testo) if t not in _PAROLE_VUOTE}
+        termini = {
+            t
+            for t in re.findall(r"[a-zàèéìòù0-9]{4,}", testo)
+            if t not in competitor_text.PAROLE_VUOTE
+        }
         per_pagina.update(termini)
     return [{"termine": t, "pagine": c} for t, c in per_pagina.most_common(15) if c >= 2]
+
+
+def _vista_pagina(pagina: dict, max_caratteri: int) -> dict:
+    """La pagina com'e' nel report: solo i campi utili a chi legge, con il
+    testo limitato all'estratto."""
+    dati_prodotto = dict(pagina["dati_prodotto"])
+    if dati_prodotto:
+        dati_prodotto["descrizione"] = dati_prodotto["descrizione"][:max_caratteri]
+    return {
+        "url": pagina["url"],
+        "tipo": pagina["tipo"],
+        "titolo": pagina["titolo"],
+        "meta_description": pagina["meta_description"],
+        "h1": pagina["h1"],
+        "h2": pagina["h2"][:5],
+        "dati_strutturati": pagina["dati_strutturati"],
+        "n_parole": pagina["n_parole"],
+        "struttura": pagina["struttura"],
+        "dati_prodotto": dati_prodotto,
+        "estratto": pagina["estratto"],
+    }
 
 
 def _costruisci_report(
@@ -535,11 +671,12 @@ def _costruisci_report(
     sitemap: str | None,
     urls_in_sitemap: dict[str, int],
     avvisi: list[str],
+    testo: dict,
+    max_caratteri: int,
 ) -> dict:
     per_tipo = {
-        tipo: _riepilogo_tipo([p for p in pagine if p["tipo"] == tipo])
-        for tipo in ("categoria", "prodotto")
-        if any(p["tipo"] == tipo for p in pagine)
+        tipo: {**_riepilogo_tipo([p for p in pagine if p["tipo"] == tipo]), **dettagli}
+        for tipo, dettagli in testo["per_tipo"].items()
     }
     return {
         "sito": sito,
@@ -553,12 +690,14 @@ def _costruisci_report(
         "sitemap": {"indirizzo": sitemap, "url_trovati": urls_in_sitemap},
         "avvisi": avvisi,
         "riepilogo_per_tipo": per_tipo,
-        "parole_ricorrenti": _parole_ricorrenti(pagine),
-        "pagine": pagine,
+        "parole_nei_titoli": _parole_ricorrenti(pagine),
+        "messaggi_ripetuti_sul_sito": testo["messaggi_ripetuti_sul_sito"],
+        "pagine": [_vista_pagina(p, max_caratteri) for p in pagine],
         "nota_uso": (
-            "Spunti sugli schemi del sito analizzato (struttura, lunghezze, temi, dati "
-            "strutturati), non testi da riutilizzare: non copiare titoli, description o "
-            "descrizioni, e scrivi solo cose vere sui nostri prodotti."
+            "Gli estratti e il vocabolario servono a capire intenzione, tono e modo di "
+            "descrivere i prodotti del sito analizzato: analizzali e scrivi testi "
+            "originali, con parole tue. Non riutilizzare frasi, titoli o description del "
+            "concorrente e scrivi solo cose vere sui nostri prodotti."
         ),
     }
 
@@ -588,7 +727,7 @@ def _avviso_pagine_identiche(pagine: list[dict]) -> str | None:
 # --- entry point ------------------------------------------------------------
 
 
-def _analizza(url: str, max_categorie: int, max_prodotti: int) -> dict:
+def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: int) -> dict:
     url = _normalizza_url(url)
     scaricatore = _Scaricatore(url)
     scaricatore.carica_robots()
@@ -649,8 +788,9 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int) -> dict:
         avvisi.append(
             "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
         )
+    testo = competitor_text.analizza_testi(pagine, max_caratteri)
     return _costruisci_report(
-        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi
+        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, testo, max_caratteri
     )
 
 
@@ -658,14 +798,18 @@ def analizza_seo_sito(
     url: str,
     max_categorie: int = MAX_CATEGORIE_DEFAULT,
     max_prodotti: int = MAX_PRODOTTI_DEFAULT,
+    caratteri_per_pagina: int = CARATTERI_DEFAULT,
 ) -> dict:
     """Analisi SEO a campione del sito `url`; vedi la docstring del modulo.
-    I limiti sono accettati entro un tetto massimo. In caso di problemi
+    I limiti sono accettati entro un tetto massimo (`caratteri_per_pagina` e'
+    la lunghezza dell'estratto di testo di ogni pagina, 0 = nessun estratto).
+    In caso di problemi
     prevedibili (sito non raggiungibile, robots.txt che lo vieta, rete privata)
     restituisce {"errore": ...} invece di sollevare."""
     max_categorie = max(0, min(max_categorie, TETTO_CATEGORIE))
     max_prodotti = max(0, min(max_prodotti, TETTO_PRODOTTI))
+    caratteri_per_pagina = max(0, min(caratteri_per_pagina, TETTO_CARATTERI))
     try:
-        return _analizza(url, max_categorie, max_prodotti)
+        return _analizza(url, max_categorie, max_prodotti, caratteri_per_pagina)
     except ErroreAnalisi as errore:
         return {"errore": str(errore)}
