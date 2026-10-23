@@ -7,6 +7,7 @@ from push_contempt_mcp.seo_tools import (
     leggi_seo_prodotto,
     lista_stato_seo_prodotti,
     riepilogo_analisi_per_plugin,
+    rimuovi_analisi_dal_plugin,
     ripristina_seo_prodotti,
     salva_analisi_nel_plugin,
     valida_contenuto_seo,
@@ -289,3 +290,37 @@ def test_salva_analisi_nel_plugin_non_blocca_mai(monkeypatch):
     monkeypatch.setenv("WP_APP_USER", "Andrea")
 
     assert "valutazione" in salva_analisi_nel_plugin({"errore": "x"})["motivo"]
+
+
+def test_rimuovi_analisi_dal_plugin_chiama_delete_con_il_sito_normalizzato(monkeypatch):
+    chiamate = []
+
+    def delete_finto(url, params, auth, verify, timeout):
+        chiamate.append({"url": url, "params": params})
+        return _RispostaFinta({"eliminata": True})
+
+    monkeypatch.setattr(requests, "delete", delete_finto)
+    esito = rimuovi_analisi_dal_plugin("https://www.Euronics.it/telefonia/")
+    assert esito == {"rimossa": True, "sito": "euronics.it"}
+    assert chiamate == [
+        {
+            "url": "https://localhost/wp-json/push-contempt/v1/concorrenti",
+            "params": {"sito": "euronics.it"},
+        }
+    ]
+
+
+def test_rimuovi_analisi_dal_plugin_dice_perche_non_ha_rimosso(monkeypatch):
+    monkeypatch.setattr(
+        requests, "delete", lambda *a, **k: _RispostaFinta({"eliminata": False})
+    )
+    assert "non era nella lista" in rimuovi_analisi_dal_plugin("x.it")["motivo"]
+
+    def delete_che_fallisce(*args, **kwargs):
+        raise requests.ConnectionError("rifiutata")
+
+    monkeypatch.setattr(requests, "delete", delete_che_fallisce)
+    assert "rifiutata" in rimuovi_analisi_dal_plugin("x.it")["motivo"]
+
+    monkeypatch.delenv("WP_APP_USER")
+    assert "non configurato" in rimuovi_analisi_dal_plugin("x.it")["motivo"]

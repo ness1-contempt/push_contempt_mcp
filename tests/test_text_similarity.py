@@ -7,6 +7,7 @@ from push_contempt_mcp.text_similarity import (
     _livello_sequenza,
     carica_riferimenti,
     controlla,
+    elimina_corpus,
     salva_corpus,
 )
 
@@ -138,6 +139,16 @@ def _pagine():
             "testo": "Un altro testo.",
         },
     ]
+
+
+def test_elimina_i_testi_salvati_di_un_sito():
+    salva_corpus("https://www.concorrente.it", _pagine())
+    salva_corpus("https://www.altro.it", _pagine())
+
+    assert elimina_corpus("concorrente.it") is True
+    assert carica_riferimenti("concorrente.it") == []
+    assert elimina_corpus("https://www.concorrente.it/") is False  # gia' tolto
+    assert carica_riferimenti("altro.it") != []  # gli altri siti non si toccano
 
 
 def test_salva_e_carica_i_riferimenti_di_un_sito():

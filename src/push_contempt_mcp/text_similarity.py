@@ -182,6 +182,15 @@ def _nome_file(sito: str) -> str:
     return re.sub(r"[^a-z0-9.-]", "_", host) + ".json"
 
 
+def elimina_corpus(sito: str) -> bool:
+    """Toglie i testi salvati in locale di un sito. True se c'erano."""
+    file = cartella_cache() / _nome_file(sito)
+    if not file.is_file():
+        return False
+    file.unlink()
+    return True
+
+
 def salva_corpus(sito: str, pagine: list[dict]) -> Path:
     """Salva i testi delle pagine analizzate (url, titolo, meta description,
     testo) per i confronti successivi. Solleva OSError se non puo' scrivere."""

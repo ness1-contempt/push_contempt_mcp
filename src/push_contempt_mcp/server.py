@@ -408,6 +408,23 @@ def analizza_pagine_salvate(
 
 
 @mcp.tool()
+def rimuovi_analisi_sito(sito: str, anche_testi_locali: bool = True) -> dict:
+    """Toglie un sito analizzato dalla tabella «Concorrenti e confronto» della tab
+    SEO del plugin (con il suo storico), per esempio perche' il report era
+    inutile. Con `anche_testi_locali` (predefinito) cancella anche i testi di quel
+    sito salvati sul computer dell'utente: dopo, controlla_somiglianza non puo'
+    piu' confrontare con quel sito finche' non viene analizzato di nuovo.
+    Usalo SOLO su richiesta esplicita dell'utente, dicendogli quale sito stai
+    togliendo. Non tocca i prodotti ne' i campi SEO gia' scritti. `sito` e' il
+    nome come compare nella tabella (es. "tomatosmartphone.it") o l'indirizzo.
+    """
+    risultato = {"plugin": seo_tools.rimuovi_analisi_dal_plugin(sito)}
+    if anche_testi_locali:
+        risultato["testi_locali_eliminati"] = text_similarity.elimina_corpus(sito)
+    return risultato
+
+
+@mcp.tool()
 def controlla_somiglianza(
     testo: str,
     sito: str = "",

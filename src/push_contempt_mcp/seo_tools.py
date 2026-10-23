@@ -195,6 +195,28 @@ def salva_analisi_nel_plugin(report: dict, url: str = "") -> dict:
     return {"salvata": True, "sito": riepilogo["sito"], "proprio": riepilogo["proprio"]}
 
 
+def rimuovi_analisi_dal_plugin(sito: str) -> dict:
+    """Toglie dalla tab SEO del plugin l'analisi di un sito (con il suo storico).
+    Non blocca mai: se il plugin non risponde lo dice nell'esito."""
+    if not all(os.environ.get(v) for v in ("WP_SITE_URL", "WP_APP_USER", "WP_APP_PASSWORD")):
+        return {"rimossa": False, "motivo": "sito WordPress non configurato"}
+    host = _host(sito)
+    try:
+        risposta = requests.delete(
+            f"{os.environ['WP_SITE_URL']}/wp-json/push-contempt/v1/concorrenti",
+            params={"sito": host},
+            auth=_auth(),
+            verify=False,
+            timeout=15,
+        )
+        risposta.raise_for_status()
+    except requests.RequestException as errore:
+        return {"rimossa": False, "motivo": f"il plugin non ha risposto: {errore}"}
+    if not risposta.json().get("eliminata"):
+        return {"rimossa": False, "motivo": f"{host} non era nella lista del plugin"}
+    return {"rimossa": True, "sito": host}
+
+
 def valida_contenuto_seo(descrizione: str, parola_chiave_focus: str) -> list[str]:
     """Controlli on-page sugli stessi criteri usati da Yoast: densita' della
     frase chiave, presenza nei sottotitoli H2/H3, presenza di almeno un link

@@ -141,6 +141,11 @@ Copia `.env.example` in `.env` e compila:
   sono elencati e il giudizio finale resta all'utilizzatore. Il punteggio è solo
   un riferimento, non vincolante: va mostrato all'utente e il livello accettato
   scelto da lui prima di applicare qualsiasi modifica ai prodotti.
+- `rimuovi_analisi_sito` — toglie un sito dalla tabella «Concorrenti e confronto» della tab SEO
+  (con il suo storico) e, di norma, ne cancella anche i testi salvati in locale; si usa solo su
+  richiesta dell'utente, per esempio quando un report è inutile. Dopo, `controlla_somiglianza` non
+  confronta più con quel sito finché non lo si analizza di nuovo. L'utente può anche togliere
+  la riga a mano dalla tab («Togli dalla lista»), che però lascia i testi locali.
 - Il riepilogo di ogni valutazione (punteggi per area con la prova dei criteri, mai i testi
   delle pagine) viene mandato al plugin (`POST /concorrenti`) e compare nella sezione
   "Concorrenti e confronto" della tab SEO; se l'indirizzo è quello di `WP_SITE_URL` è marcato

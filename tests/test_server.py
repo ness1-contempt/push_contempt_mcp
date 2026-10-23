@@ -32,6 +32,7 @@ async def test_list_tools():
             "aggiorna_seo_categoria",
             "leggi_analisi_seo_yoast",
             "analizza_seo_sito",
+            "rimuovi_analisi_sito",
             "controlla_somiglianza",
             "analizza_pagine_salvate",
             "lista_ordini",
