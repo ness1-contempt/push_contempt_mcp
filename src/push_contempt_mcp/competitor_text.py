@@ -51,9 +51,9 @@ _SEGNALI = {
     ),
     "fiducia_e_servizio": (
         r"\b(?:spedizione (?:gratuita|gratis|rapida|veloce|express)"
-        r"|consegna (?:gratuita|rapida|veloce|express|in \d+\s?\w+)|resi?|rimbors\w*|garanzia"
-        r"|pagament\w* sicur\w*|ufficial\w*|original\w*|assistenza|recension\w*"
-        r"|free shipping|warranty|returns?|secure payment)\b"
+        r"|spedizion\w*|consegn\w*|ritiro|pagament\w*|resi?|rimbors\w*|garanzia"
+        r"|ufficial\w*|original\w*|assistenza|chat|recension\w*"
+        r"|free shipping|shipping|delivery|payment|warranty|returns?|support)\b"
     ),
     "offerta_e_urgenza": (
         r"(?:\b(?:offert\w*|sconto|sconti|risparmi\w*|promo\w*|solo oggi|ultimi pezzi"
@@ -70,8 +70,14 @@ _SEGNALI = {
 _RE_SEGNALI = {nome: re.compile(modello) for nome, modello in _SEGNALI.items()}
 
 
+_RE_IMPORTO = re.compile(r"(?:[€$£]\s?\d[\d.,]*|\d[\d.,]*\s?(?:€|(?:eur|euro)\b))", re.IGNORECASE)
+
+
 def _norm(testo: str) -> str:
-    return " ".join(testo.lower().split())
+    """Testo in minuscolo, con gli spazi ridotti e gli importi in valuta sostituiti da
+    "€#": cosi' "Prezzo di listino €16,50" e "Prezzo di listino €19,90" risultano
+    lo stesso blocco (etichetta del sito) e non due contenuti diversi."""
+    return " ".join(_RE_IMPORTO.sub("€#", testo.lower()).split())
 
 
 def _termine_valido(token: str) -> bool:
@@ -97,10 +103,25 @@ def blocchi_ripetuti(blocchi_per_pagina: list[list[str]]) -> dict[str, int]:
     return {blocco: n for blocco, n in conteggio.items() if n >= soglia}
 
 
+# Frasi di interfaccia e accessibilita' (non messaggi commerciali) che i temi
+# ripetono ovunque.
+_RE_RUMORE_INTERFACCIA = re.compile(
+    r"si apre in una nuova finestra|opens in a new window|aggiornamento completo della pagina"
+    r"|full page refresh|vai direttamente ai contenuti|skip to content|consenso ai cookie"
+    r"|cookie consent",
+    re.IGNORECASE,
+)
+
+
 def messaggi_ripetuti(ripetuti: dict[str, int]) -> list[dict]:
     """I blocchi ripetuti che sembrano messaggi (da 3 a 25 parole), i piu'
-    diffusi per primi: inviti all'acquisto, spedizioni, resi, garanzie."""
-    messaggi = [(b, n) for b, n in ripetuti.items() if 3 <= len(b.split()) <= 25]
+    diffusi per primi: inviti all'acquisto, spedizioni, resi, garanzie. Le frasi
+    di interfaccia (accessibilita', cookie) sono escluse."""
+    messaggi = [
+        (b, n)
+        for b, n in ripetuti.items()
+        if 3 <= len(b.split()) <= 25 and not _RE_RUMORE_INTERFACCIA.search(b)
+    ]
     messaggi.sort(key=lambda coppia: -coppia[1])
     return [
         {"testo": blocco[:MAX_CARATTERI_MESSAGGIO], "pagine": n}
@@ -112,19 +133,37 @@ def senza_ripetuti(blocchi: list[str], ripetuti: dict[str, int]) -> list[str]:
     return [b for b in blocchi if _norm(b) not in ripetuti]
 
 
+def intestazioni_ripetute(liste: list[list[str]]) -> set[str]:
+    """Intestazioni (H2) presenti in almeno meta' delle pagine (e in non meno di
+    3), come "Consenso ai cookie" o "Lingua": sono del template, non del
+    contenuto. Anche qui servono almeno 4 pagine."""
+    if len(liste) < 4:
+        return set()
+    conteggio: Counter = Counter()
+    for intestazioni in liste:
+        conteggio.update({_norm(h) for h in intestazioni})
+    soglia = max(3, math.ceil(len(liste) / 2))
+    return {h for h, n in conteggio.items() if n >= soglia}
+
+
 # --- estratto e segnali di una pagina ----------------------------------------
 
 
-def estratto(blocchi_propri: list[str], max_caratteri: int) -> str:
-    """Primi blocchi di testo "vero" (almeno 4 parole), tagliati a fine parola:
-    abbastanza per capire tono e intenzione, non per copiare una descrizione."""
+def estratto(blocchi_propri: list[str], max_caratteri: int, escludi: set[str] = frozenset()) -> str:
+    """Primi blocchi di testo "vero", tagliati a fine parola: abbastanza per
+    capire tono e intenzione, non per copiare una descrizione. Si tengono anche
+    le righe brevi ("TAGLIA: M"), che in molte schede sono il contenuto; si
+    saltano prezzi, ripetizioni dentro la pagina e i testi in `escludi` (titoli)."""
     if max_caratteri <= 0:
         return ""
     scelti: list[str] = []
+    visti: set[str] = set(escludi)
     lunghezza = 0
     for blocco in blocchi_propri:
-        if len(blocco.split()) < 4:
+        chiave = _norm(blocco)
+        if chiave in visti or len(chiave) < 3 or _e_prezzo(chiave):
             continue
+        visti.add(chiave)
         scelti.append(blocco)
         lunghezza += len(blocco) + 1
         if lunghezza >= max_caratteri:
@@ -133,6 +172,11 @@ def estratto(blocchi_propri: list[str], max_caratteri: int) -> str:
     if len(testo) <= max_caratteri:
         return testo
     return testo[:max_caratteri].rsplit(" ", 1)[0] + "…"
+
+
+def _e_prezzo(chiave: str) -> bool:
+    """Blocco breve che contiene un importo (gia' normalizzato a "€#")."""
+    return "€#" in chiave and len(chiave.split()) <= 8
 
 
 def segnali_pagina(blocchi: list[str], blocchi_propri: list[str]) -> dict:
@@ -221,14 +265,21 @@ def vocabolario(testi: list[str]) -> dict:
 
 def analizza_testi(pagine: list[dict], max_caratteri: int) -> dict:
     """Arricchisce le pagine (in place) con `estratto`, `_segnali` e
-    `_testo_proprio` (campi interni, usati per i riepiloghi) e consuma il campo
-    `_blocchi`. Restituisce i messaggi ripetuti del sito e, per ogni tipo di
-    pagina diverso dalla home, stile/intenzione e vocabolario."""
-    ripetuti = blocchi_ripetuti([p["_blocchi"] for p in pagine if p["tipo"] != "home"])
+    `_testo_proprio` (campi interni, usati per i riepiloghi), toglie dalle
+    intestazioni H2 quelle del template e consuma `_blocchi` (contenuto dopo
+    l'H1) e `_blocchi_tutti` (tutto il testo, usato per riconoscere il template,
+    perche' avvisi e banner stanno prima dell'H1). Restituisce i messaggi
+    ripetuti del sito e, per ogni tipo di pagina diverso dalla home,
+    stile/intenzione e vocabolario."""
+    ripetuti = blocchi_ripetuti([p["_blocchi_tutti"] for p in pagine])
+    intestazioni = intestazioni_ripetute([p["h2"] for p in pagine])
     for pagina in pagine:
         blocchi = pagina.pop("_blocchi")
+        pagina.pop("_blocchi_tutti")
         propri = senza_ripetuti(blocchi, ripetuti)
-        pagina["estratto"] = estratto(propri, max_caratteri)
+        pagina["h2"] = [h for h in pagina["h2"] if _norm(h) not in intestazioni]
+        titoli = {_norm(t) for t in [pagina["titolo"], *pagina["h1"]] if t}
+        pagina["estratto"] = estratto(propri, max_caratteri, titoli)
         pagina["_segnali"] = segnali_pagina(blocchi, propri)
         pagina["_testo_proprio"] = "\n".join(propri)
 

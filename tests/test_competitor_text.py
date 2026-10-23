@@ -1,7 +1,9 @@
 from push_contempt_mcp.competitor_text import (
+    _norm,
     analizza_testi,
     blocchi_ripetuti,
     estratto,
+    intestazioni_ripetute,
     messaggi_ripetuti,
     riepilogo_stile,
     segnali_pagina,
@@ -52,12 +54,53 @@ def test_senza_ripetuti_toglie_i_blocchi_del_template():
     ]
 
 
-def test_estratto_salta_i_blocchi_corti_e_taglia_a_fine_parola():
-    blocchi = ["€ 1.299,00", "Aggiungi al carrello", "Un telefono potente con display luminoso"]
-    assert estratto(blocchi, 500) == "Un telefono potente con display luminoso"
+def test_estratto_tiene_le_righe_brevi_ma_salta_prezzi_titoli_e_ripetizioni():
+    blocchi = [
+        "Giacca vintage XL",  # titolo: escluso
+        "Prezzo di listino €47,50",  # prezzo
+        "CODICE ARTICOLO: 18677",
+        "TAGLIA: XL",
+        "TAGLIA: XL",  # ripetizione nella stessa pagina
+        "49,90 €",  # prezzo
+        "Un giaccone robusto in pelle con interno in lana.",
+    ]
+    assert (
+        estratto(blocchi, 500, {"giacca vintage xl"})
+        == "CODICE ARTICOLO: 18677 TAGLIA: XL Un giaccone robusto in pelle con interno in lana."
+    )
+
+
+def test_estratto_taglia_a_fine_parola_e_rispetta_il_tetto():
+    blocchi = ["Un telefono potente con display luminoso"]
     assert estratto(blocchi, 22) == "Un telefono potente…"  # niente parole tagliate a meta'
     assert estratto(blocchi, 0) == ""
     assert estratto([], 100) == ""
+
+
+def test_norm_rende_uguali_le_etichette_che_cambiano_solo_nell_importo():
+    assert _norm("Prezzo di listino €16,50") == _norm("Prezzo  di LISTINO €19,90")
+    assert _norm("Costa 25 euro") == _norm("Costa 40 EUR")
+    assert _norm("Costa 25,50 €") == _norm("Costa €40")
+    assert _norm("Taglia 40") != _norm("Taglia 42")  # i numeri che non sono importi restano
+
+
+def test_intestazioni_ripetute_servono_4_pagine_e_meta_di_esse():
+    pagine = [["Consenso ai cookie", f"Titolo {i}"] for i in range(4)]
+    assert intestazioni_ripetute(pagine) == {"consenso ai cookie"}
+    assert intestazioni_ripetute(pagine[:3]) == set()
+    sei = [["Scheda tecnica"] if i < 2 else [f"Altro {i}"] for i in range(6)]
+    assert intestazioni_ripetute(sei) == set()  # 2 pagine su 6: contenuto, non template
+
+
+def test_messaggi_ripetuti_escludono_le_frasi_di_interfaccia():
+    ripetuti = {
+        "si apre in una nuova finestra.": 9,
+        "scegliendo una selezione si ottiene un aggiornamento completo della pagina.": 9,
+        "ritiro disponibile, di solito pronto in 24 ore": 8,
+    }
+    assert [m["testo"] for m in messaggi_ripetuti(ripetuti)] == [
+        "ritiro disponibile, di solito pronto in 24 ore"
+    ]
 
 
 def test_segnali_pagina_conta_formule_misure_e_punteggiatura():
@@ -135,19 +178,33 @@ def test_vocabolario_unita_di_misura_e_sigle_con_cifre():
 
 
 def test_analizza_testi_arricchisce_le_pagine_e_consuma_i_blocchi():
+    banner = "Noi e i nostri partner utilizziamo cookie per personalizzare la tua esperienza"
+
     def pagina(tipo, i):
+        titolo = f"Modello {i}"
+        contenuto = [f"Il modello {i} ha una batteria enorme e un display nitido."]
         return {
             "tipo": tipo,
-            "_blocchi": [SPEDIZIONE, f"Il modello {i} ha una batteria enorme e un display nitido."],
+            "titolo": titolo,
+            "h1": [titolo],
+            "h2": ["Consenso ai cookie", f"Dettagli {i}"],
+            # il banner sta prima dell'H1: c'e' solo in _blocchi_tutti
+            "_blocchi_tutti": [banner, titolo, SPEDIZIONE, *contenuto],
+            "_blocchi": [SPEDIZIONE, *contenuto],
         }
 
     pagine = [pagina("home", 0)] + [pagina("prodotto", i) for i in range(1, 5)]
     risultato = analizza_testi(pagine, 200)
 
-    assert all("_blocchi" not in p for p in pagine)
+    assert all("_blocchi" not in p and "_blocchi_tutti" not in p for p in pagine)
     assert pagine[1]["estratto"] == "Il modello 1 ha una batteria enorme e un display nitido."
     assert pagine[1]["_testo_proprio"] == pagine[1]["estratto"]
-    assert risultato["messaggi_ripetuti_sul_sito"] == [{"testo": SPEDIZIONE.lower(), "pagine": 4}]
+    # l'H2 del template sparisce, quello di contenuto resta
+    assert pagine[1]["h2"] == ["Dettagli 1"]
+    # il template si riconosce su tutto il testo (banner compreso), home inclusa
+    testi = [m["testo"] for m in risultato["messaggi_ripetuti_sul_sito"]]
+    assert SPEDIZIONE.lower() in testi and banner.lower() in testi
+    assert all(m["pagine"] == 5 for m in risultato["messaggi_ripetuti_sul_sito"])
     assert list(risultato["per_tipo"]) == ["prodotto"]  # niente "home" ne' tipi senza pagine
     termini = [t["termine"] for t in risultato["per_tipo"]["prodotto"]["vocabolario"]["termini"]]
-    assert "batteria" in termini and "spedizione" not in termini
+    assert "batteria" in termini and "spedizione" not in termini and "cookie" not in termini

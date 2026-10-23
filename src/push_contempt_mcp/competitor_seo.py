@@ -542,7 +542,7 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
         "meta_description": meta_description,
         "lunghezza_meta": len(meta_description),
         "h1": estrattore.h1[:3],
-        "h2": estrattore.h2[:8],
+        "h2": estrattore.h2[:30],  # poi si tolgono quelle del template; il report ne mostra 5
         "n_h3": estrattore.n_h3,
         "dati_strutturati": _tipi_schema(estrattore.json_ld),
         "canonical": estrattore.canonical,
@@ -563,6 +563,7 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
         },
         "dati_prodotto": _dati_prodotto(estrattore.json_ld),
         "_blocchi": estrattore.blocchi_dopo_h1 if estrattore.h1 else estrattore.blocchi,
+        "_blocchi_tutti": estrattore.blocchi,
     }
     return pagina, interni
 
@@ -590,6 +591,21 @@ def _tipo_da_nome_sitemap(url: str) -> str | None:
     if ("product" in nome or "prodott" in nome) and "tag" not in nome:
         return "prodotto"
     return None
+
+
+_RE_PREFISSO_LINGUA = re.compile(r"^/([a-z]{2}(?:-[a-z]{2})?)(/.*)$")
+
+
+def _senza_varianti_lingua(urls: list[str]) -> list[str]:
+    """Toglie le versioni con prefisso di lingua (/en/..., /fr/...) di una pagina
+    che esiste anche senza prefisso: sono la stessa pagina tradotta e
+    sprecherebbero un posto del campione."""
+    percorsi = {urlsplit(u).path for u in urls}
+    return [
+        u
+        for u in urls
+        if not ((m := _RE_PREFISSO_LINGUA.match(urlsplit(u).path)) and m.group(2) in percorsi)
+    ]
 
 
 def _campiona(urls: list[str], quanti: int) -> list[str]:
@@ -897,7 +913,7 @@ def _analizza(
         if tipo:
             da_home[tipo].append(link)
     for tipo in da_home:
-        trovati[tipo] = trovati[tipo] or da_home[tipo]
+        trovati[tipo] = _senza_varianti_lingua(trovati[tipo] or da_home[tipo])
     urls_in_sitemap = {"categorie": len(trovati["categoria"]), "prodotti": len(trovati["prodotto"])}
 
     campione = [

@@ -409,7 +409,9 @@ def _negozio_finto() -> dict[str, tuple[int, str]]:
         f"{base}/": (200, _pagina_html("Home", "Il tuo negozio di telefoni", schema="WebSite")),
     }
     for i, url in enumerate(prodotti, 1):
-        sito[url] = (200, _pagina_html(f"Telefono {i}", f"Telefono {i}"))
+        # "Scheda tecnica" solo su alcuni prodotti: un'intestazione di contenuto che ricorre
+        h2 = ("Caratteristiche", "Pagamento") + (("Scheda tecnica",) if i in (1, 3, 7) else ())
+        sito[url] = (200, _pagina_html(f"Telefono {i}", f"Telefono {i}", h2))
     for i, url in enumerate(categorie, 1):
         sito[url] = (200, _pagina_html(f"Categoria {i}", f"Categoria {i}", schema="CollectionPage"))
     return sito
@@ -444,7 +446,8 @@ def test_analizza_seo_sito_costruisce_il_report(monkeypatch):
     assert prodotti["meta_description"]["presente_percentuale"] == 100
     assert prodotti["con_un_solo_h1_percentuale"] == 100
     assert prodotti["dati_strutturati"] == {"Product": 9}
-    assert {"testo": "caratteristiche", "pagine": 9} in prodotti["h2_ricorrenti"]
+    # "Caratteristiche" e "Pagamento" sono su tutte le pagine: template, non contenuto
+    assert prodotti["h2_ricorrenti"] == [{"testo": "scheda tecnica", "pagine": 3}]
     assert report["riepilogo_per_tipo"]["categoria"]["dati_strutturati"] == {"CollectionPage": 3}
     assert {"termine": "negozio", "pagine": 13} in report["parole_nei_titoli"]
     assert "originali" in report["nota_uso"]
@@ -461,7 +464,7 @@ def test_il_report_ha_estratti_vocabolario_e_stile_senza_il_template(monkeypatch
         assert "descrizione propria con dettagli unici" in pagina["estratto"]
         assert "Spedizione gratuita" not in pagina["estratto"]  # e' template, non contenuto
     # la frase ripetuta ovunque diventa un messaggio del sito
-    assert report["messaggi_ripetuti_sul_sito"] == [{"testo": SPEDIZIONE.lower(), "pagine": 12}]
+    assert report["messaggi_ripetuti_sul_sito"] == [{"testo": SPEDIZIONE.lower(), "pagine": 13}]
     vocabolario = report["riepilogo_per_tipo"]["prodotto"]["vocabolario"]
     assert {"termine": "dettagli", "pagine": 9} in vocabolario["termini"]
     assert {"coppia": "descrizione propria", "pagine": 9} in vocabolario["coppie_di_parole"]
@@ -903,3 +906,38 @@ def test_pagine_salvate_errori_prevedibili(tmp_path):
     vuota = tmp_path / "vuota"
     vuota.mkdir()
     assert "Nessun file .html" in competitor_seo.analizza_pagine_salvate([str(vuota)])["errore"]
+
+
+def test_varianti_di_lingua_non_occupano_il_campione():
+    urls = [
+        "https://esempio.it/collections/velluto",
+        "https://esempio.it/en/collections/velluto",
+        "https://esempio.it/fr/collections/velluto",
+        "https://esempio.it/en/collections/solo-inglese",  # non ha l'equivalente senza prefisso
+        "https://esempio.it/collections/lana",
+        "https://esempio.it/it/collections/lana",
+        "https://esempio.it/products/ab",  # "ab" non e' un prefisso di lingua: e' un prodotto
+    ]
+    assert competitor_seo._senza_varianti_lingua(urls) == [
+        "https://esempio.it/collections/velluto",
+        "https://esempio.it/en/collections/solo-inglese",
+        "https://esempio.it/collections/lana",
+        "https://esempio.it/products/ab",
+    ]
+
+
+def test_l_analisi_non_campiona_le_varianti_di_lingua(monkeypatch):
+    sito = _negozio_finto()
+    base = "https://esempio.it"
+    categorie = [f"{base}/categoria-prodotto/cat-{i}/" for i in range(1, 4)]
+    con_varianti = categorie + [u.replace(base, f"{base}/en") for u in categorie]
+    sito[f"{base}/product_cat-sitemap.xml"] = (
+        200,
+        "<urlset>" + "".join(f"<url><loc>{u}</loc></url>" for u in con_varianti) + "</urlset>",
+    )
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(base)
+
+    assert report["sitemap"]["url_trovati"]["categorie"] == 3
+    assert not any("/en/" in p["url"] for p in report["pagine"])
