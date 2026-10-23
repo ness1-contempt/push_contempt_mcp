@@ -281,6 +281,7 @@ def analizza_seo_sito(
     max_prodotti: int = 10,
     caratteri_per_pagina: int = 600,
     usa_curl: bool = False,
+    usa_browser: bool = False,
 ) -> dict:
     """Analizza a campione il sito di un altro negozio (di norma un concorrente)
     per capire come e' fatta la sua SEO e come descrive i prodotti: scarica la
@@ -319,9 +320,18 @@ def analizza_seo_sito(
     lo chiede esplicitamente, tipicamente per un sito che risponde 429 alla
     libreria ma non a curl: e' una sua scelta e una sua responsabilita'.
     Non cambiare User-Agent e non aggirare altri blocchi.
+
+    `usa_browser`: attiva il metodo con un browser vero (Chromium in locale, con il
+    suo User-Agent di serie, senza scaricare immagini e video). Funziona anche per i
+    siti costruiti con JavaScript. L'utente puo' attivarlo una volta per tutte con
+    SEO_ANALISI_USA_BROWSER=1; imposta questo parametro solo se l'utente lo chiede.
+    Con il browser attivo la scala e': HTTP; se la home risponde 403/429 o sembra
+    costruita con JavaScript, si aspetta il Retry-After e si passa al browser. Il
+    report dice il `metodo` usato. Se nemmeno il browser basta, l'errore suggerisce
+    analizza_pagine_salvate.
     """
     return competitor_seo.analizza_seo_sito(
-        url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl
+        url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl, usa_browser
     )
 
 

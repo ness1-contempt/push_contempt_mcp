@@ -74,6 +74,15 @@ class ErroreAnalisi(Exception):
     """Errore atteso (rete, robots.txt, URL non valido): finisce nel report."""
 
 
+class SitoBloccato(ErroreAnalisi):
+    """La home risponde 403/429: il sito non accetta questo tipo di richieste. Chi
+    chiama puo' ritentare con un altro metodo (browser)."""
+
+    def __init__(self, messaggio: str, retry_after: float | None = None):
+        super().__init__(messaggio)
+        self.retry_after = retry_after
+
+
 class _Risposta:
     def __init__(self, status: int, url: str, testo: str, retry_after: float | None = None):
         self.status = status
@@ -241,11 +250,92 @@ def _scarica_grezzo_curl(url: str, host_base: str) -> _Risposta:
     return _scarica(url, host_base, _richiesta_curl)
 
 
+def _avvia_playwright():
+    """Avvia un Chromium senza finestra, con il suo User-Agent di serie, che non
+    scarica immagini, video e font (pesano sul sito e non servono all'analisi).
+    Restituisce (funzione che chiude tutto, pagina)."""
+    from playwright.sync_api import sync_playwright
+
+    avvio = sync_playwright().start()
+    browser = avvio.chromium.launch(headless=True)
+    pagina = browser.new_page()
+    pagina.route(
+        "**/*",
+        lambda route: (
+            route.abort()
+            if route.request.resource_type in ("image", "media", "font")
+            else route.continue_()
+        ),
+    )
+
+    def chiudi():
+        browser.close()
+        avvio.stop()
+
+    return chiudi, pagina
+
+
+class _Browser:
+    """Trasporto con un browser vero: carica la pagina (JavaScript compreso) e ne
+    restituisce l'HTML gia' costruito. Si avvia alla prima richiesta."""
+
+    def __init__(self):
+        self._chiudi = None
+        self._pagina = None
+
+    def scarica(self, url: str, host_base: str) -> _Risposta:
+        _controlla_destinazione(url)
+        if self._pagina is None:
+            try:
+                self._chiudi, self._pagina = _avvia_playwright()
+            except Exception as errore:  # noqa: BLE001 - Playwright non installato o senza Chromium
+                raise ErroreAnalisi(
+                    f"Browser non disponibile: {errore.__class__.__name__}"
+                ) from errore
+        try:
+            risposta = self._pagina.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                self._pagina.wait_for_load_state("load", timeout=10000)
+            except Exception:  # noqa: BLE001 - se non arriva a "load" si usa quello che c'e'
+                pass
+            self._pagina.wait_for_timeout(500)  # un attimo per il JavaScript della pagina
+            if risposta is None:
+                raise ErroreAnalisi(f"{url}: nessuna risposta")
+            if _host_base(self._pagina.url) != host_base:
+                raise ErroreAnalisi(f"Redirect verso un altro dominio: {self._pagina.url}")
+            tipo = risposta.headers.get("content-type", "").lower()
+            testo = self._pagina.content() if "html" in tipo else risposta.text()
+            attesa = (risposta.headers.get("retry-after") or "").strip()
+            return _Risposta(
+                risposta.status,
+                self._pagina.url,
+                testo[:MAX_BYTE],
+                float(attesa) if attesa.isdigit() else None,
+            )
+        except ErroreAnalisi:
+            raise
+        except Exception as errore:  # noqa: BLE001 - timeout, rete, pagina chiusa
+            raise ErroreAnalisi(f"{url}: {errore.__class__.__name__}") from errore
+
+    def chiudi(self):
+        if self._chiudi:
+            self._chiudi()
+        self._chiudi = self._pagina = None
+
+
 class _Scaricatore:
     """Aggiunge a _scarica_grezzo il rispetto di robots.txt e la pausa."""
 
-    def __init__(self, url_iniziale: str, usa_curl: bool = False):
+    def __init__(
+        self,
+        url_iniziale: str,
+        usa_curl: bool = False,
+        browser: "_Browser | None" = None,
+        ritenta_dopo_429: bool = True,
+    ):
         self.usa_curl = usa_curl
+        self.browser = browser
+        self.ritenta_dopo_429 = ritenta_dopo_429
         parti = urlsplit(url_iniziale)
         self.origine = f"{parti.scheme}://{parti.netloc}"
         self.host = _host_base(url_iniziale)
@@ -256,6 +346,8 @@ class _Scaricatore:
 
     def _scarica(self, url: str) -> _Risposta:
         # Le funzioni di trasporto si cercano al momento della chiamata (i test le sostituiscono).
+        if self.browser:
+            return self.browser.scarica(url, self.host)
         scarica = _scarica_grezzo_curl if self.usa_curl else _scarica_grezzo
         return scarica(url, self.host)
 
@@ -284,7 +376,8 @@ class _Scaricatore:
             # Se il sito chiede di rallentare si aspetta quanto indicato e si
             # ritenta una volta sola; se insiste, non si prosegue (vedi _analizza).
             if (
-                risposta.status in (429, 503)
+                self.ritenta_dopo_429
+                and risposta.status in (429, 503)
                 and risposta.retry_after is not None
                 and risposta.retry_after <= RETRY_AFTER_MASSIMO_SECONDI
             ):
@@ -835,12 +928,20 @@ def _avviso_pagine_identiche(pagine: list[dict]) -> str | None:
 # --- entry point ------------------------------------------------------------
 
 
+_SUGGERIMENTO_BROWSER = (
+    "Si puo' provare con un browser vero: attiva SEO_ANALISI_USA_BROWSER=1 (o usa_browser=true "
+    "per questa analisi). In alternativa salva le pagine dal tuo browser e usa "
+    "analizza_pagine_salvate."
+)
+_SUGGERIMENTO_PAGINE_SALVATE = (
+    "Anche con un browser il sito non lascia leggere le pagine: salvale dal tuo browser e usa "
+    "analizza_pagine_salvate."
+)
+
+
 def _motivo_http(status: int) -> str:
-    if status == 429:
-        return (
-            "HTTP 429: il sito limita le richieste automatiche. Non aggiro il blocco "
-            "(riprova piu' tardi, o dai al sito un'altra via, vedi i suoi termini)"
-        )
+    if status in (403, 429):
+        return f"HTTP {status}: il sito non accetta richieste automatiche da questo client"
     return f"HTTP {status}"
 
 
@@ -885,13 +986,23 @@ def _chiudi_analisi(
 
 
 def _analizza(
-    url: str, max_categorie: int, max_prodotti: int, max_caratteri: int, usa_curl: bool
+    url: str,
+    max_categorie: int,
+    max_prodotti: int,
+    max_caratteri: int,
+    usa_curl: bool = False,
+    browser: "_Browser | None" = None,
+    ritenta_dopo_429: bool = True,
 ) -> dict:
     url = _normalizza_url(url)
-    scaricatore = _Scaricatore(url, usa_curl)
+    scaricatore = _Scaricatore(url, usa_curl, browser, ritenta_dopo_429)
     scaricatore.carica_robots()
 
     risposta_home = scaricatore.get(url)
+    if risposta_home.status in (403, 429):
+        raise SitoBloccato(
+            f"Pagina iniziale: {_motivo_http(risposta_home.status)}", risposta_home.retry_after
+        )
     if risposta_home.status != 200:
         raise ErroreAnalisi(f"Pagina iniziale: {_motivo_http(risposta_home.status)}")
     home, link_home = _estrai_pagina(
@@ -950,26 +1061,82 @@ def _analizza(
     )
 
 
+def _sembra_costruito_con_js(report: dict) -> bool:
+    return any(a.startswith("La home ha quasi nessun testo") for a in report.get("avvisi", []))
+
+
+def _analizza_con_browser(url, max_categorie, max_prodotti, max_caratteri, motivo: str) -> dict:
+    browser = _Browser()
+    try:
+        report = _analizza(
+            url, max_categorie, max_prodotti, max_caratteri, browser=browser, ritenta_dopo_429=False
+        )
+    except SitoBloccato as errore:
+        raise ErroreAnalisi(f"{errore}. {_SUGGERIMENTO_PAGINE_SALVATE}") from errore
+    finally:
+        browser.chiudi()
+    report["metodo"] = "browser"
+    report["avvisi"].append(f"Pagine caricate con un browser (Chromium) perche' {motivo}.")
+    return report
+
+
 def analizza_seo_sito(
     url: str,
     max_categorie: int = MAX_CATEGORIE_DEFAULT,
     max_prodotti: int = MAX_PRODOTTI_DEFAULT,
     caratteri_per_pagina: int = CARATTERI_DEFAULT,
     usa_curl: bool = False,
+    usa_browser: bool = False,
 ) -> dict:
     """Analisi SEO a campione del sito `url`; vedi la docstring del modulo.
-    `usa_curl` fa le richieste con il programma curl invece che con requests
-    (stesso User-Agent dichiarato, stesse regole): e' una scelta dell'utente.
     I limiti sono accettati entro un tetto massimo (`caratteri_per_pagina` e'
     la lunghezza dell'estratto di testo di ogni pagina, 0 = nessun estratto).
-    In caso di problemi
-    prevedibili (sito non raggiungibile, robots.txt che lo vieta, rete privata)
-    restituisce {"errore": ...} invece di sollevare."""
+
+    Metodi, dal piu' leggero: richieste HTTP (o curl, se `usa_curl`); se la home
+    risponde 403/429 o sembra costruita con JavaScript e il browser e' attivo
+    (`usa_browser` o SEO_ANALISI_USA_BROWSER=1), si riprova con un Chromium vero,
+    dopo aver aspettato il Retry-After; se non basta, restano le pagine salvate
+    (analizza_pagine_salvate). Il report dice il `metodo` usato. In caso di
+    problemi prevedibili restituisce {"errore": ...} invece di sollevare."""
     max_categorie = max(0, min(max_categorie, TETTO_CATEGORIE))
     max_prodotti = max(0, min(max_prodotti, TETTO_PRODOTTI))
     caratteri_per_pagina = max(0, min(caratteri_per_pagina, TETTO_CARATTERI))
+    con_browser = usa_browser or os.environ.get("SEO_ANALISI_USA_BROWSER") == "1"
     try:
-        return _analizza(url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl)
+        try:
+            report = _analizza(
+                url,
+                max_categorie,
+                max_prodotti,
+                caratteri_per_pagina,
+                usa_curl,
+                ritenta_dopo_429=not con_browser,
+            )
+        except SitoBloccato as bloccato:
+            if not con_browser:
+                raise ErroreAnalisi(f"{bloccato}. {_SUGGERIMENTO_BROWSER}") from bloccato
+            # Il sito ha chiesto di aspettare: lo si fa prima di qualsiasi altra richiesta.
+            time.sleep(min(bloccato.retry_after or 0, RETRY_AFTER_MASSIMO_SECONDI))
+            return _analizza_con_browser(
+                url,
+                max_categorie,
+                max_prodotti,
+                caratteri_per_pagina,
+                "il sito rifiuta le richieste automatiche semplici",
+            )
+        report["metodo"] = "curl" if usa_curl else "http"
+        if con_browser and _sembra_costruito_con_js(report):
+            try:
+                return _analizza_con_browser(
+                    url,
+                    max_categorie,
+                    max_prodotti,
+                    caratteri_per_pagina,
+                    "le pagine sembrano costruite con JavaScript",
+                )
+            except ErroreAnalisi as errore:
+                report["avvisi"].append(f"Provato anche con il browser, senza riuscirci: {errore}")
+        return report
     except ErroreAnalisi as errore:
         return {"errore": str(errore)}
 

@@ -21,6 +21,7 @@ from push_contempt_mcp.competitor_seo import (
 def _senza_pause_e_rete_privata(monkeypatch, tmp_path):
     monkeypatch.setattr(competitor_seo, "PAUSA_SECONDI", 0)
     monkeypatch.delenv("SEO_ANALISI_CONSENTI_RETE_PRIVATA", raising=False)
+    monkeypatch.delenv("SEO_ANALISI_USA_BROWSER", raising=False)
     monkeypatch.setenv("SEO_ANALISI_CACHE_DIR", str(tmp_path / "cache"))  # mai la cache vera
 
 
@@ -646,7 +647,8 @@ def test_429_che_continua_sulla_home_da_un_errore_chiaro_senza_insistere(monkeyp
 
     errore = analizza_seo_sito("https://esempio.it")["errore"]
 
-    assert "429" in errore and "Non aggiro" in errore
+    assert "429" in errore
+    assert "SEO_ANALISI_USA_BROWSER" in errore and "analizza_pagine_salvate" in errore
     assert richieste.count("https://esempio.it/") == 2  # una richiesta + un solo nuovo tentativo
     assert pause == [60.0]
 
@@ -941,3 +943,228 @@ def test_l_analisi_non_campiona_le_varianti_di_lingua(monkeypatch):
 
     assert report["sitemap"]["url_trovati"]["categorie"] == 3
     assert not any("/en/" in p["url"] for p in report["pagine"])
+
+
+# --- scala dei metodi: HTTP, poi browser, poi pagine salvate ----------------
+
+
+def _installa_browser(monkeypatch, sito, errore_avvio=None):
+    """Sostituisce _Browser con uno che serve le pagine di `sito` ({url: (status, testo)})."""
+    uso = {"istanze": 0, "richieste": [], "chiuso": 0}
+
+    class BrowserFinto:
+        def __init__(self):
+            uso["istanze"] += 1
+
+        def scarica(self, url, host_base):
+            if errore_avvio:
+                raise ErroreAnalisi(errore_avvio)
+            uso["richieste"].append(url)
+            stato, testo = sito.get(url, (404, ""))
+            return _Risposta(stato, url, testo)
+
+        def chiudi(self):
+            uso["chiuso"] += 1
+
+    monkeypatch.setattr(competitor_seo, "_Browser", BrowserFinto)
+    return uso
+
+
+def _http_limitato(monkeypatch, home_http: _Risposta):
+    """HTTP semplice: robots.txt assente, home = `home_http`, nient'altro."""
+    return _sito_con_limiti(monkeypatch, {"https://esempio.it/": [home_http]})
+
+
+def test_http_che_basta_non_avvia_il_browser(monkeypatch):
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    _sito_finto(monkeypatch, _negozio_finto())
+
+    report = analizza_seo_sito("https://esempio.it", usa_browser=True)
+
+    assert report["metodo"] == "http"
+    assert uso["istanze"] == 0
+
+
+def test_429_con_browser_attivo_aspetta_il_retry_after_e_passa_al_browser(monkeypatch):
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    richieste, pause = _http_limitato(monkeypatch, _Risposta(429, "https://esempio.it/", "", 60.0))
+
+    report = analizza_seo_sito("https://esempio.it", usa_browser=True)
+
+    assert "errore" not in report
+    assert report["metodo"] == "browser"
+    assert any("perche' il sito rifiuta" in a for a in report["avvisi"])
+    assert richieste.count("https://esempio.it/") == 1  # HTTP: una richiesta, senza nuovo tentativo
+    assert pause == [60.0]  # si aspetta quanto chiesto dal sito prima del browser
+    assert uso["istanze"] == 1 and uso["chiuso"] == 1
+    assert len(report["pagine"]) > 5  # l'analisi e' completa
+
+
+def test_il_browser_si_attiva_anche_con_la_variabile_d_ambiente(monkeypatch):
+    monkeypatch.setenv("SEO_ANALISI_USA_BROWSER", "1")
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    _http_limitato(monkeypatch, _Risposta(403, "https://esempio.it/", ""))
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert report["metodo"] == "browser" and uso["istanze"] == 1
+
+
+def test_senza_browser_un_429_da_il_suggerimento_e_il_vecchio_comportamento(monkeypatch):
+    uso = _installa_browser(monkeypatch, _negozio_finto())
+    richieste, pause = _http_limitato(monkeypatch, _Risposta(429, "https://esempio.it/", "", 60.0))
+
+    errore = analizza_seo_sito("https://esempio.it")["errore"]
+
+    assert "SEO_ANALISI_USA_BROWSER" in errore
+    assert richieste.count("https://esempio.it/") == 2  # senza browser si ritenta una volta
+    assert uso["istanze"] == 0
+
+
+def test_se_anche_il_browser_e_respinto_si_suggeriscono_le_pagine_salvate(monkeypatch):
+    sito = {"https://esempio.it/": (429, "")}
+    uso = _installa_browser(monkeypatch, sito)
+    _http_limitato(monkeypatch, _Risposta(429, "https://esempio.it/", "", None))
+
+    errore = analizza_seo_sito("https://esempio.it", usa_browser=True)["errore"]
+
+    assert "Anche con un browser" in errore and "analizza_pagine_salvate" in errore
+    assert uso["chiuso"] == 1  # il browser si chiude comunque
+
+
+def test_home_costruita_con_javascript_passa_al_browser(monkeypatch):
+    vuota = "<html><head><title>App</title></head><body><div id=root></div></body></html>"
+    _installa_browser(monkeypatch, _negozio_finto())
+    _sito_finto(monkeypatch, {"https://esempio.it/": (200, vuota)})
+
+    report = analizza_seo_sito("https://esempio.it", usa_browser=True)
+
+    assert report["metodo"] == "browser"
+    assert not any(a.startswith("La home ha quasi nessun testo") for a in report["avvisi"])
+    assert any("sembrano costruite con JavaScript" in a for a in report["avvisi"])
+    assert report["campione"]["prodotti"] > 0
+
+
+def test_se_il_browser_non_riesce_resta_il_report_http_con_un_avviso(monkeypatch):
+    vuota = "<html><head><title>App</title></head><body><div id=root></div></body></html>"
+    _installa_browser(monkeypatch, {}, errore_avvio="Browser non disponibile: Error")
+    _sito_finto(monkeypatch, {"https://esempio.it/": (200, vuota)})
+
+    report = analizza_seo_sito("https://esempio.it", usa_browser=True)
+
+    assert report["metodo"] == "http"
+    assert any("Provato anche con il browser, senza riuscirci" in a for a in report["avvisi"])
+    assert any("JavaScript" in a for a in report["avvisi"])
+
+
+# --- il trasporto browser (con una pagina finta) ----------------------------
+
+
+class _RispostaPlaywrightFinta:
+    def __init__(self, status, headers, testo):
+        self.status, self.headers, self._testo = status, headers, testo
+
+    def text(self):
+        return self._testo
+
+
+class _PaginaFinta:
+    def __init__(self, destinazioni):
+        self.destinazioni = destinazioni  # url -> (url finale, status, headers, testo)
+        self.url = ""
+        self.visitati = []
+        self.html = ""
+
+    def goto(self, url, wait_until, timeout):
+        self.visitati.append(url)
+        self.url, status, headers, testo = self.destinazioni[url]
+        self.html = testo
+        return _RispostaPlaywrightFinta(status, headers, testo)
+
+    def wait_for_load_state(self, *args, **kwargs):
+        pass
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def content(self):
+        return self.html
+
+
+def _browser_con_pagina(monkeypatch, destinazioni):
+    pagina = _PaginaFinta(destinazioni)
+    chiuso = []
+    monkeypatch.setattr(
+        competitor_seo, "_avvia_playwright", lambda: (lambda: chiuso.append(1), pagina)
+    )
+    monkeypatch.setattr(competitor_seo, "_risolvi", lambda host: ["93.184.216.34"])
+    return pagina, chiuso
+
+
+def test_browser_html_xml_e_retry_after(monkeypatch):
+    pagina, chiuso = _browser_con_pagina(
+        monkeypatch,
+        {
+            "https://esempio.it/": (
+                "https://esempio.it/",
+                200,
+                {"content-type": "text/html"},
+                "<html>costruito</html>",
+            ),
+            "https://esempio.it/sitemap.xml": (
+                "https://esempio.it/sitemap.xml",
+                200,
+                {"content-type": "application/xml"},
+                "<urlset><url><loc>x</loc></url></urlset>",
+            ),
+            "https://esempio.it/limitata": (
+                "https://esempio.it/limitata",
+                429,
+                {"content-type": "text/html", "retry-after": "30"},
+                "troppe richieste",
+            ),
+        },
+    )
+    browser = competitor_seo._Browser()
+
+    html = browser.scarica("https://esempio.it/", "esempio.it")
+    xml = browser.scarica("https://esempio.it/sitemap.xml", "esempio.it")
+    limitata = browser.scarica("https://esempio.it/limitata", "esempio.it")
+    browser.chiudi()
+
+    assert (html.status, html.testo) == (200, "<html>costruito</html>")  # HTML gia' costruito
+    assert "<loc>x</loc>" in xml.testo  # non HTML: il corpo della risposta
+    assert (limitata.status, limitata.retry_after) == (429, 30.0)
+    assert chiuso == [1]
+    assert len(pagina.visitati) == 3
+
+
+def test_browser_rifiuta_redirect_verso_altro_dominio_e_reti_private(monkeypatch):
+    _browser_con_pagina(
+        monkeypatch,
+        {
+            "https://esempio.it/vai": (
+                "https://altro.example/",
+                200,
+                {"content-type": "text/html"},
+                "<html></html>",
+            )
+        },
+    )
+    browser = competitor_seo._Browser()
+    with pytest.raises(ErroreAnalisi, match="altro dominio"):
+        browser.scarica("https://esempio.it/vai", "esempio.it")
+
+    monkeypatch.setattr(competitor_seo, "_risolvi", lambda host: ["10.0.0.5"])
+    with pytest.raises(ErroreAnalisi, match="rete privata"):
+        browser.scarica("https://interno.example/", "interno.example")
+
+
+def test_browser_non_disponibile_da_un_errore_chiaro(monkeypatch):
+    def avvio_che_fallisce():
+        raise RuntimeError("Executable doesn't exist")
+
+    monkeypatch.setattr(competitor_seo, "_avvia_playwright", avvio_che_fallisce)
+    monkeypatch.setattr(competitor_seo, "_risolvi", lambda host: ["93.184.216.34"])
+    with pytest.raises(ErroreAnalisi, match="Browser non disponibile"):
+        competitor_seo._Browser().scarica("https://esempio.it/", "esempio.it")

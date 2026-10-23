@@ -106,7 +106,11 @@ Copia `.env.example` in `.env` e compila:
   l'assistente giudica intenzione e tono. Le formule ripetute su tutto il sito
   (spedizioni, resi, "aggiungi al carrello") sono separate dai contenuti. Gira
   sul tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
-  richieste e non esegue JavaScript. Con `usa_curl` (scelta esplicita dell'utente) fa
+  richieste. Metodi, dal più leggero: HTTP; se la home risponde 403/429 o è
+  costruita con JavaScript e il browser è attivo (`SEO_ANALISI_USA_BROWSER=1` o
+  `usa_browser`), dopo aver aspettato il `Retry-After` si passa a un Chromium vero in
+  locale; se non basta, `analizza_pagine_salvate`. Il report dice il `metodo` usato.
+  Con `usa_curl` (scelta esplicita dell'utente) fa
   le richieste con il programma `curl`, sempre con il nostro User-Agent dichiarato; se
   il sito risponde ancora 429 si ferma, non aggira i blocchi. Rifiuta reti private; per provarlo su un
   sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`. Vocabolario ed estratti
