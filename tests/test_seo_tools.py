@@ -236,9 +236,10 @@ def _report(sito="https://www.euronics.it"):
 
 
 def test_riepilogo_per_plugin_ha_solo_i_punteggi_e_marca_il_sito_proprio(monkeypatch):
-    riepilogo = riepilogo_analisi_per_plugin(_report())
+    riepilogo = riepilogo_analisi_per_plugin(_report(), "https://www.euronics.it/telefonia/")
     assert riepilogo == {
         "sito": "euronics.it",
+        "url": "https://www.euronics.it/telefonia/",
         "proprio": False,
         "perimetro": "/telefonia",
         "data": "2026-10-23",

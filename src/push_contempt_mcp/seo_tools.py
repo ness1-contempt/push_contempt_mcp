@@ -146,17 +146,19 @@ def _host(indirizzo: str) -> str:
     return host.removeprefix("www.")
 
 
-def riepilogo_analisi_per_plugin(report: dict) -> dict | None:
+def riepilogo_analisi_per_plugin(report: dict, url: str = "") -> dict | None:
     """Dal report di analizza_seo_sito / analizza_pagine_salvate, solo quello che
     il plugin conserva: punteggi per area con la prova di ogni criterio. Dei
-    testi delle pagine non parte niente. None se il report non ha una
-    valutazione (errore, o nessuna area misurabile)."""
+    testi delle pagine non parte niente. `url` e' l'indirizzo che l'utente ha
+    dato da analizzare (serve al plugin per riproporlo all'assistente). None se
+    il report non ha una valutazione (errore, o nessuna area misurabile)."""
     valutazione = report.get("valutazione")
     if not valutazione or not valutazione.get("aree") or not report.get("sito"):
         return None
     host = _host(report["sito"])
     return {
         "sito": host,
+        "url": url,
         "proprio": host == _host(os.environ.get("WP_SITE_URL", "")),
         "perimetro": report.get("perimetro") or "",
         "data": report.get("data", ""),
@@ -167,7 +169,7 @@ def riepilogo_analisi_per_plugin(report: dict) -> dict | None:
     }
 
 
-def salva_analisi_nel_plugin(report: dict) -> dict:
+def salva_analisi_nel_plugin(report: dict, url: str = "") -> dict:
     """Manda al plugin il riepilogo di un'analisi, cosi' compare nella tab SEO di
     wp-admin. Mai bloccante: se manca la configurazione del sito, se l'utente l'ha
     disattivato (SEO_ANALISI_SALVA_NEL_PLUGIN=0) o se il plugin non risponde,
@@ -176,7 +178,7 @@ def salva_analisi_nel_plugin(report: dict) -> dict:
         return {"salvata": False, "motivo": "disattivato (SEO_ANALISI_SALVA_NEL_PLUGIN=0)"}
     if not all(os.environ.get(v) for v in ("WP_SITE_URL", "WP_APP_USER", "WP_APP_PASSWORD")):
         return {"salvata": False, "motivo": "sito WordPress non configurato"}
-    riepilogo = riepilogo_analisi_per_plugin(report)
+    riepilogo = riepilogo_analisi_per_plugin(report, url)
     if riepilogo is None:
         return {"salvata": False, "motivo": "il report non ha una valutazione da salvare"}
     try:

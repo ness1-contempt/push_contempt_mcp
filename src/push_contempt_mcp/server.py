@@ -386,7 +386,7 @@ def analizza_seo_sito(
         usa_browser,
         browser_visibile,
     )
-    return {**report, "plugin": seo_tools.salva_analisi_nel_plugin(report)}
+    return {**report, "plugin": seo_tools.salva_analisi_nel_plugin(report, url)}
 
 
 @mcp.tool()
