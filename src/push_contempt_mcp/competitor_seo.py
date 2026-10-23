@@ -1091,7 +1091,7 @@ def _composizione(pagine: list[dict], perimetro: str) -> dict[str, dict[str, int
         if pagina["tipo"] not in ("categoria", "prodotto"):
             continue
         segmenti = [x for x in urlsplit(pagina["url"]).path.split("/") if x]
-        if not perimetro and segmenti and re.fullmatch(r"[a-z]{2}", segmenti[0]):
+        if not perimetro and segmenti and re.fullmatch(r"[a-z]{2}(?:-[a-z]{2})?", segmenti[0]):
             segmenti = segmenti[1:]  # prefisso di lingua (/it/...)
         segmenti = segmenti[saltare:]
         gruppo = segmenti[0] if len(segmenti) > 1 else "(radice)"
@@ -1174,7 +1174,9 @@ def _analizza(
                 da_pagina[tipo].append(link)
         if da_pagina["prodotto"] or (da_pagina["categoria"] and not trovati["categoria"]):
             trovati["prodotto"] = _senza_varianti_lingua(da_pagina["prodotto"])
-            if not trovati["categoria"]:
+            if len(da_pagina["categoria"]) > len(trovati["categoria"]):
+                # il campione e' quello che la pagina collega, salvo che la sitemap sotto il
+                # percorso offra piu' categorie
                 trovati["categoria"] = _senza_varianti_lingua(da_pagina["categoria"])
             campione_da_link = True
             avvisi.append(

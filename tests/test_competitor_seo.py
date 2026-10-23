@@ -1675,3 +1675,32 @@ def test_con_prodotti_sotto_il_percorso_non_si_passa_ai_link(monkeypatch):
 
     assert report["perimetro"] == "/telefonia"
     assert not any("collegati da quella pagina" in a for a in report["avvisi"])
+
+
+def test_composizione_salta_anche_il_prefisso_lingua_con_paese():
+    pagine = [
+        {"tipo": "prodotto", "url": "https://esempio.it/it-it/p/iphone-16"},
+        {"tipo": "prodotto", "url": "https://esempio.it/it-it/p/iphone-15/abc"},
+        {"tipo": "categoria", "url": "https://esempio.it/it/l/telefoni/id"},
+    ]
+    # saltato "it-it" / "it", il gruppo e' il tratto successivo: qui /p/ e /l/
+    assert competitor_seo._composizione(pagine, "") == {
+        "prodotto": {"p": 2},
+        "categoria": {"l": 1},
+    }
+
+
+def test_nel_passaggio_ai_link_anche_le_categorie_vengono_dalla_pagina(monkeypatch):
+    """Se la sitemap sotto il percorso offre meno categorie di quelle collegate dalla pagina."""
+    sito, elenco, prodotti, liste = _elenco_con_prodotti_altrove()
+    # la sitemap elenca una sola categoria sotto il percorso (diversa dalla pagina iniziale)
+    sito["https://esempio.it/sitemap.xml"] = (
+        200,
+        f"<urlset><url><loc>{elenco}/sottolista</loc></url></urlset>",
+    )
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(elenco, max_categorie=10, max_prodotti=30)
+
+    assert report["campione"]["categorie"] == 3  # le liste collegate dalla pagina
+    assert report["campione"]["prodotti"] == 14
