@@ -69,9 +69,15 @@ CARATTERI_DEFAULT = 600
 TETTO_CARATTERI = 2000
 
 _SEPARATORI_TITOLO = (" | ", " - ", " – ", " — ", " • ", " · ")
-_FRAGMENT_CATEGORIA = ("/product-category/", "/categoria-prodotto/", "/categoria/", "/category/")
+_FRAGMENT_CATEGORIA = (
+    "/product-category/",
+    "/categoria-prodotto/",
+    "/categoria/",
+    "/category/",
+    "/l/",  # pagine di elenco (es. /it-it/l/smartphone/...)
+)
 _FRAGMENT_COLLEZIONE = ("/collections/", "/collection/")
-_FRAGMENT_PRODOTTO = ("/product/", "/products/", "/prodotto/", "/prodotti/")
+_FRAGMENT_PRODOTTO = ("/product/", "/products/", "/prodotto/", "/prodotti/", "/p/")
 
 
 class ErroreAnalisi(Exception):
@@ -1106,6 +1112,7 @@ def _analizza(
     url = _normalizza_url(url)
     perimetro = _perimetro(url)
     modo_pagina = _e_pagina(url)
+    campione_da_link = modo_pagina  # vero anche se si passa ai link dopo (vedi sotto)
     scaricatore = _Scaricatore(url, usa_curl, browser, ritenta_dopo_429)
     scaricatore.carica_robots()
 
@@ -1135,6 +1142,7 @@ def _analizza(
         )
     else:
         trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
+    link_tutti = list(link_home)
     if perimetro:
         # Si analizza solo la sezione indicata: sitemap e link restano dentro il suo percorso.
         trovati = {t: [u for u in v if _nel_perimetro(u, perimetro)] for t, v in trovati.items()}
@@ -1153,7 +1161,22 @@ def _analizza(
             da_home[tipo].append(link)
     for tipo in da_home:
         trovati[tipo] = _senza_varianti_lingua(trovati[tipo] or da_home[tipo])
-    if not trovati["prodotto"] and not modo_pagina:
+    if perimetro and not trovati["prodotto"] and not trovati["categoria"]:
+        # Sotto il percorso indicato non c'e' niente (prodotti e liste stanno altrove, es.
+        # /l/smartphone/... e /p/...): si campiona fra cio' che la pagina stessa collega.
+        da_pagina: dict[str, list[str]] = {"categoria": [], "prodotto": []}
+        for link in link_tutti:
+            tipo = _tipo_da_percorso(link)
+            if tipo:
+                da_pagina[tipo].append(link)
+        if da_pagina["categoria"] or da_pagina["prodotto"]:
+            trovati = {t: _senza_varianti_lingua(v) for t, v in da_pagina.items()}
+            campione_da_link = True
+            avvisi.append(
+                "Nessuna categoria o prodotto sotto il percorso indicato: il campione e' scelto "
+                "fra quelli collegati da quella pagina."
+            )
+    if not trovati["prodotto"] and not campione_da_link:
         gruppo, tratto = _gruppo_dominante(altri)
         if gruppo:
             trovati["prodotto"] = gruppo
@@ -1208,8 +1231,10 @@ def _analizza(
         max_caratteri,
         sitemap_verificata=not modo_pagina,
     )
-    report["perimetro"] = f"pagina {urlsplit(url).path}" if modo_pagina else perimetro or None
-    report["campione"]["composizione"] = _composizione(pagine, perimetro)
+    report["perimetro"] = f"pagina {urlsplit(url).path}" if campione_da_link else perimetro or None
+    report["campione"]["composizione"] = _composizione(
+        pagine, "" if campione_da_link else perimetro
+    )
     return report
 
 

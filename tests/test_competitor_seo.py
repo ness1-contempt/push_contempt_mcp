@@ -1603,3 +1603,67 @@ def test_il_trasporto_browser_chiede_la_finestra_solo_se_visibile(monkeypatch):
         with pytest.raises(ErroreAnalisi, match="Browser non disponibile"):
             competitor_seo._Browser(visibile).scarica("https://esempio.it/", "esempio.it")
     assert richieste == [False, True]
+
+
+# --- elenchi senza estensione, con i prodotti in un altro percorso (/l/... e /p/...) ---
+
+
+def test_riconosce_gli_indirizzi_di_elenco_e_di_prodotto_brevi():
+    assert (
+        competitor_seo._tipo_da_percorso("https://esempio.it/it-it/p/iphone-15/abc-123")
+        == "prodotto"
+    )
+    assert (
+        competitor_seo._tipo_da_percorso("https://esempio.it/it-it/l/smartphone/abc-123")
+        == "categoria"
+    )
+    assert competitor_seo._tipo_da_percorso("https://esempio.it/it-it/chi-siamo") is None
+    assert (
+        competitor_seo._tipo_da_percorso("https://esempio.it/app/pagina") is None
+    )  # "/app/" non e' "/p/"
+
+
+def _elenco_con_prodotti_altrove():
+    base = "https://esempio.it"
+    prodotti = [f"{base}/it-it/p/telefono-{i}/id-{i:04d}" for i in range(14)]
+    liste = [f"{base}/it-it/l/{c}/id-l{i}" for i, c in enumerate(("android", "ios", "tablet"))]
+    elenco = f"{base}/it-it/l/smartphone/6c29-0010"
+    link = "".join(f'<a href="{u}">x</a>' for u in prodotti + liste)
+    pagina_elenco = (
+        "<html><head><title>Smartphone ricondizionati | Negozio</title></head>"
+        f"<body><h1>Smartphone ricondizionati</h1>{link}</body></html>"
+    )
+    sito = {elenco: (200, pagina_elenco)}
+    for u in prodotti + liste:
+        sito[u] = (200, _pagina_html("Pagina", "Pagina"))
+    # sitemap senza niente sotto il percorso dell'elenco
+    sito[f"{base}/sitemap.xml"] = (
+        200,
+        f"<urlset><url><loc>{base}/it-it/chi-siamo</loc></url></urlset>",
+    )
+    return sito, elenco, prodotti, liste
+
+
+def test_se_sotto_il_percorso_non_c_e_niente_si_usano_i_link_della_pagina(monkeypatch):
+    sito, elenco, prodotti, liste = _elenco_con_prodotti_altrove()
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(elenco, max_prodotti=30)
+
+    assert report["perimetro"] == "pagina /it-it/l/smartphone/6c29-0010"
+    assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (3, 14)
+    assert {p["url"] for p in report["pagine"][1:]} == set(prodotti) | set(liste)
+    assert any("collegati da quella pagina" in a for a in report["avvisi"])
+    # la sitemap e' stata letta, quindi il criterio resta valutabile
+    criteri = [c["criterio"] for c in report["valutazione"]["aree"]["tecnico"]["criteri"]]
+    assert "sitemap" in criteri
+
+
+def test_con_prodotti_sotto_il_percorso_non_si_passa_ai_link(monkeypatch):
+    """Il passaggio ai link scatta solo se il percorso non contiene nulla."""
+    _sito_finto(monkeypatch, _sito_con_sezioni())
+
+    report = analizza_seo_sito("https://esempio.it/telefonia/")
+
+    assert report["perimetro"] == "/telefonia"
+    assert not any("collegati da quella pagina" in a for a in report["avvisi"])
