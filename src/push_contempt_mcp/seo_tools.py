@@ -10,6 +10,7 @@ ragionando sui dati del prodotto.
 
 import os
 import re
+from urllib.parse import urlsplit
 
 import requests
 from dotenv import load_dotenv
@@ -131,6 +132,59 @@ def ripristina_seo_prodotti(prodotto_ids: list[int]) -> dict:
     )
     risposta.raise_for_status()
     return risposta.json()
+
+
+def _host(indirizzo: str) -> str:
+    """Il sito senza schema, "www." iniziale e percorso (chiave stabile per confrontarli)."""
+    host = urlsplit(indirizzo if "//" in indirizzo else f"//{indirizzo}").netloc.lower()
+    return host.removeprefix("www.")
+
+
+def riepilogo_analisi_per_plugin(report: dict) -> dict | None:
+    """Dal report di analizza_seo_sito / analizza_pagine_salvate, solo quello che
+    il plugin conserva: punteggi per area con la prova di ogni criterio. Dei
+    testi delle pagine non parte niente. None se il report non ha una
+    valutazione (errore, o nessuna area misurabile)."""
+    valutazione = report.get("valutazione")
+    if not valutazione or not valutazione.get("aree") or not report.get("sito"):
+        return None
+    host = _host(report["sito"])
+    return {
+        "sito": host,
+        "proprio": host == _host(os.environ.get("WP_SITE_URL", "")),
+        "perimetro": report.get("perimetro") or "",
+        "data": report.get("data", ""),
+        "metodo": report.get("metodo", ""),
+        "pagine": valutazione.get("pagine_valutate", 0),
+        "punteggio": valutazione.get("punteggio"),
+        "aree": valutazione["aree"],
+    }
+
+
+def salva_analisi_nel_plugin(report: dict) -> dict:
+    """Manda al plugin il riepilogo di un'analisi, cosi' compare nella tab SEO di
+    wp-admin. Mai bloccante: se manca la configurazione del sito, se l'utente l'ha
+    disattivato (SEO_ANALISI_SALVA_NEL_PLUGIN=0) o se il plugin non risponde,
+    l'analisi resta valida e qui si dice solo perche' non e' stata salvata."""
+    if os.environ.get("SEO_ANALISI_SALVA_NEL_PLUGIN", "1") == "0":
+        return {"salvata": False, "motivo": "disattivato (SEO_ANALISI_SALVA_NEL_PLUGIN=0)"}
+    if not all(os.environ.get(v) for v in ("WP_SITE_URL", "WP_APP_USER", "WP_APP_PASSWORD")):
+        return {"salvata": False, "motivo": "sito WordPress non configurato"}
+    riepilogo = riepilogo_analisi_per_plugin(report)
+    if riepilogo is None:
+        return {"salvata": False, "motivo": "il report non ha una valutazione da salvare"}
+    try:
+        risposta = requests.post(
+            f"{os.environ['WP_SITE_URL']}/wp-json/push-contempt/v1/concorrenti",
+            json=riepilogo,
+            auth=_auth(),
+            verify=False,
+            timeout=15,
+        )
+        risposta.raise_for_status()
+    except requests.RequestException as errore:
+        return {"salvata": False, "motivo": f"il plugin non ha accettato l'analisi: {errore}"}
+    return {"salvata": True, "sito": riepilogo["sito"], "proprio": riepilogo["proprio"]}
 
 
 def valida_contenuto_seo(descrizione: str, parola_chiave_focus: str) -> list[str]:

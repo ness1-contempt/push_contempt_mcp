@@ -6,7 +6,9 @@ from push_contempt_mcp.seo_tools import (
     leggi_seo_prodotti_selezionati,
     leggi_seo_prodotto,
     lista_stato_seo_prodotti,
+    riepilogo_analisi_per_plugin,
     ripristina_seo_prodotti,
+    salva_analisi_nel_plugin,
     valida_contenuto_seo,
 )
 
@@ -203,3 +205,74 @@ def test_ripristina_seo_prodotti_chiama_il_plugin_e_restituisce_gli_esiti(monkey
     url = "https://localhost/wp-json/push-contempt/v1/seo/ripristina"
     assert chiamate == [{"url": url, "json": {"ids": [40, 41]}}]
     assert risultato == {"40": "ripristinato", "41": "nessuno_snapshot"}
+
+
+def _report(sito="https://www.euronics.it"):
+    return {
+        "sito": sito,
+        "perimetro": "/telefonia",
+        "data": "2026-10-23",
+        "metodo": "http",
+        "estratti_non_inviati": "testo di una pagina",
+        "pagine": [{"estratto": "testo di una pagina"}],
+        "valutazione": {
+            "punteggio": 8,
+            "pagine_valutate": 14,
+            "aree": {"titoli": {"punteggio": 8, "criteri": []}},
+        },
+    }
+
+
+def test_riepilogo_per_plugin_ha_solo_i_punteggi_e_marca_il_sito_proprio(monkeypatch):
+    riepilogo = riepilogo_analisi_per_plugin(_report())
+    assert riepilogo == {
+        "sito": "euronics.it",
+        "proprio": False,
+        "perimetro": "/telefonia",
+        "data": "2026-10-23",
+        "metodo": "http",
+        "pagine": 14,
+        "punteggio": 8,
+        "aree": {"titoli": {"punteggio": 8, "criteri": []}},
+    }
+    monkeypatch.setenv("WP_SITE_URL", "https://euronics.it")
+    assert riepilogo_analisi_per_plugin(_report())["proprio"] is True
+
+
+def test_riepilogo_per_plugin_senza_valutazione_e_none():
+    assert riepilogo_analisi_per_plugin({"errore": "Pagina iniziale: HTTP 404"}) is None
+    senza_aree = {"sito": "https://x.it", "valutazione": {"aree": {}}}
+    assert riepilogo_analisi_per_plugin(senza_aree) is None
+
+
+def test_salva_analisi_nel_plugin_invia_il_riepilogo(monkeypatch):
+    chiamate = []
+
+    def post_finto(url, json, auth, verify, timeout):
+        chiamate.append({"url": url, "json": json})
+        return _RispostaFinta({"salvata": True})
+
+    monkeypatch.setattr(requests, "post", post_finto)
+    esito = salva_analisi_nel_plugin(_report())
+    assert esito == {"salvata": True, "sito": "euronics.it", "proprio": False}
+    assert chiamate[0]["url"] == "https://localhost/wp-json/push-contempt/v1/concorrenti"
+    assert "pagine" in chiamate[0]["json"] and "estratti_non_inviati" not in chiamate[0]["json"]
+
+
+def test_salva_analisi_nel_plugin_non_blocca_mai(monkeypatch):
+    def post_che_fallisce(*args, **kwargs):
+        raise requests.ConnectionError("rifiutata")
+
+    monkeypatch.setattr(requests, "post", post_che_fallisce)
+    esito = salva_analisi_nel_plugin(_report())
+    assert esito["salvata"] is False and "rifiutata" in esito["motivo"]
+
+    monkeypatch.setenv("SEO_ANALISI_SALVA_NEL_PLUGIN", "0")
+    assert "disattivato" in salva_analisi_nel_plugin(_report())["motivo"]
+    monkeypatch.delenv("SEO_ANALISI_SALVA_NEL_PLUGIN")
+
+    monkeypatch.delenv("WP_APP_USER")
+    assert "non configurato" in salva_analisi_nel_plugin(_report())["motivo"]
+    monkeypatch.setenv("WP_APP_USER", "Andrea")
+
+    assert "valutazione" in salva_analisi_nel_plugin({"errore": "x"})["motivo"]

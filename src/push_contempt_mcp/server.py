@@ -333,6 +333,10 @@ def analizza_seo_sito(
     scegliere all'utente il livello di somiglianza che accetta e mostragli
     l'anteprima.
 
+    Il riepilogo dei punteggi (senza i testi delle pagine) viene mandato anche al plugin,
+    che lo mostra nella tab SEO di wp-admin; `plugin` nel report dice se e' stato salvato.
+    Se l'indirizzo e' quello del sito dell'utente, e' segnato come "Il tuo sito".
+
     `caratteri_per_pagina` e' la lunghezza dell'estratto di ogni pagina (0 =
     nessun estratto, massimo 2000): e' quello che pesa sui token del report.
     `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
@@ -367,7 +371,7 @@ def analizza_seo_sito(
     chiede o lo approva dopo un rifiuto (403/429) anche con `usa_browser`: e' un tentativo
     in piu' contro un rifiuto del sito, non il metodo predefinito.
     """
-    return competitor_seo.analizza_seo_sito(
+    report = competitor_seo.analizza_seo_sito(
         url,
         max_categorie,
         max_prodotti,
@@ -376,6 +380,7 @@ def analizza_seo_sito(
         usa_browser,
         browser_visibile,
     )
+    return {**report, "plugin": seo_tools.salva_analisi_nel_plugin(report)}
 
 
 @mcp.tool()
@@ -392,7 +397,8 @@ def analizza_pagine_salvate(
     regole d'uso di analizza_seo_sito: testi originali, mai copiati, e
     controlla_somiglianza prima di applicarli.
     """
-    return competitor_seo.analizza_pagine_salvate(percorsi, sito, caratteri_per_pagina)
+    report = competitor_seo.analizza_pagine_salvate(percorsi, sito, caratteri_per_pagina)
+    return {**report, "plugin": seo_tools.salva_analisi_nel_plugin(report)}
 
 
 @mcp.tool()

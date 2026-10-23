@@ -138,6 +138,11 @@ Copia `.env.example` in `.env` e compila:
   sono elencati e il giudizio finale resta all'utilizzatore. Il punteggio è solo
   un riferimento, non vincolante: va mostrato all'utente e il livello accettato
   scelto da lui prima di applicare qualsiasi modifica ai prodotti.
+- Il riepilogo di ogni valutazione (punteggi per area con la prova dei criteri, mai i testi
+  delle pagine) viene mandato al plugin (`POST /concorrenti`) e compare nella sezione
+  "Concorrenti e confronto" della tab SEO; se l'indirizzo è quello di `WP_SITE_URL` è marcato
+  come "Il tuo sito" e gli altri mostrano la differenza. Non blocca mai l'analisi (il report ha
+  un campo `plugin`); `SEO_ANALISI_SALVA_NEL_PLUGIN=0` lo disattiva.
 - La `valutazione` che `analizza_seo_sito` e `analizza_pagine_salvate` aggiungono al report
   (modulo `seo_scorecard.py`) dà alla struttura SEO del sito analizzato un punteggio da 0 a 9
   per area (titoli, meta description, intestazioni, dati strutturati, contenuto, aspetti
