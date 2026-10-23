@@ -706,3 +706,200 @@ def test_se_la_cache_non_e_scrivibile_l_analisi_riesce_e_lo_dice(monkeypatch, tm
 
     assert "errore" not in report
     assert "Testi non salvati" in report["controllo_somiglianza"]
+
+
+# --- trasporto curl (scelta esplicita dell'utente) --------------------------
+
+
+def test_separa_risposta_curl_stato_intestazioni_e_corpo():
+    grezzo = (
+        b"HTTP/2 200 \r\nContent-Type: text/html; charset=ISO-8859-1\r\nRetry-After: 60\r\n\r\n"
+        b"<html>ciao</html>"
+    )
+    stato, intestazioni, corpo, codifica = competitor_seo._separa_risposta_curl(grezzo)
+    assert stato == 200
+    assert intestazioni == {"content-type": "text/html; charset=ISO-8859-1", "retry-after": "60"}
+    assert corpo == b"<html>ciao</html>"
+    assert codifica == "ISO-8859-1"
+
+
+def test_separa_risposta_curl_salta_le_risposte_provvisorie():
+    grezzo = b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 301 Moved\r\nLocation: /x\r\n\r\n"
+    stato, intestazioni, corpo, _ = competitor_seo._separa_risposta_curl(grezzo)
+    assert (stato, intestazioni["location"], corpo) == (301, "/x", b"")
+
+
+def test_separa_risposta_curl_rifiuta_output_non_http():
+    with pytest.raises(ErroreAnalisi, match="non riconosciuta"):
+        competitor_seo._separa_risposta_curl(b"qualcosa che non e' http")
+
+
+class _ProcessoFinto:
+    def __init__(self, comando, uscita=b"HTTP/2 200\r\nContent-Type: text/html\r\n\r\nciao"):
+        self.comando = comando
+        self.stdout = type("S", (), {"read": lambda _, n: uscita})()
+        self.stderr = type("E", (), {"read": lambda _: b""})()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def kill(self):
+        pass
+
+    def wait(self):
+        pass
+
+
+def test_richiesta_curl_usa_user_agent_dichiarato_senza_shell(monkeypatch):
+    lanciati = []
+
+    def popen_finto(comando, **kwargs):
+        lanciati.append((comando, kwargs))
+        return _ProcessoFinto(comando)
+
+    monkeypatch.setattr(competitor_seo.subprocess, "Popen", popen_finto)
+
+    stato, _, corpo, _ = competitor_seo._richiesta_curl("https://esempio.it/x")
+
+    comando, kwargs = lanciati[0]
+    assert isinstance(comando, list) and comando[0] == "curl"  # lista, niente shell
+    assert "shell" not in kwargs
+    assert comando[comando.index("-A") + 1] == competitor_seo.USER_AGENT
+    assert "push_contempt_mcp-seo" in competitor_seo.USER_AGENT
+    assert comando[-1] == "https://esempio.it/x"
+    assert "-L" not in comando  # i redirect li gestiamo noi, restando sul dominio
+    assert (stato, corpo) == (200, b"ciao")
+
+
+def test_richiesta_curl_senza_curl_installato(monkeypatch):
+    def popen_che_fallisce(comando, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(competitor_seo.subprocess, "Popen", popen_che_fallisce)
+    with pytest.raises(ErroreAnalisi, match="curl non e' installato"):
+        competitor_seo._richiesta_curl("https://esempio.it/")
+
+
+def test_usa_curl_sceglie_il_trasporto_solo_se_richiesto(monkeypatch):
+    sito = _negozio_finto()
+    chiamate = {"requests": 0, "curl": 0}
+
+    def trasporto(nome):
+        def scarica(url, host_base):
+            chiamate[nome] += 1
+            stato, testo = sito.get(url, (404, ""))
+            return _Risposta(stato, url, testo)
+
+        return scarica
+
+    monkeypatch.setattr(competitor_seo, "_scarica_grezzo", trasporto("requests"))
+    monkeypatch.setattr(competitor_seo, "_scarica_grezzo_curl", trasporto("curl"))
+
+    assert "errore" not in analizza_seo_sito("https://esempio.it")
+    assert chiamate["requests"] > 0 and chiamate["curl"] == 0
+
+    chiamate.update(requests=0, curl=0)
+    assert "errore" not in analizza_seo_sito("https://esempio.it", usa_curl=True)
+    assert chiamate["curl"] > 0 and chiamate["requests"] == 0
+
+
+def test_con_curl_valgono_ancora_robots_e_stop_al_429(monkeypatch):
+    sito = _negozio_finto()
+    sito["https://esempio.it/robots.txt"] = (200, "User-agent: *\nDisallow: /\n")
+    monkeypatch.setattr(
+        competitor_seo,
+        "_scarica_grezzo_curl",
+        lambda url, host: _Risposta(*(lambda s: (s[0], url, s[1]))(sito.get(url, (404, "")))),
+    )
+    assert (
+        "vietato da robots.txt" in analizza_seo_sito("https://esempio.it", usa_curl=True)["errore"]
+    )
+
+    limitata = _Risposta(429, "https://esempio.it/", "", None)
+    monkeypatch.setattr(competitor_seo, "_scarica_grezzo_curl", lambda url, host: limitata)
+    assert "429" in analizza_seo_sito("https://esempio.it", usa_curl=True)["errore"]
+
+
+# --- pagine salvate dall'utente ---------------------------------------------
+
+
+def _salva(cartella, nome, url, html):
+    html = html.replace("</head>", f'<link rel="canonical" href="{url}"></head>')
+    (cartella / nome).write_text(html, encoding="utf-8")
+
+
+def _cartella_pagine(tmp_path):
+    cartella = tmp_path / "salvate"
+    cartella.mkdir()
+    base = "https://esempio.it"
+    _salva(
+        cartella, "home.html", f"{base}/", _pagina_html("Home", "Il tuo negozio", schema="WebSite")
+    )
+    _salva(
+        cartella,
+        "cat.html",
+        f"{base}/categoria-prodotto/telefoni/",
+        _pagina_html("Telefoni", "Telefoni"),
+    )
+    for i in range(1, 5):
+        _salva(
+            cartella,
+            f"p{i}.htm",
+            f"{base}/prodotto/telefono-{i}/",
+            _pagina_html(f"Telefono {i}", f"Telefono {i}"),
+        )
+    return cartella
+
+
+def test_pagine_salvate_analisi_senza_rete(monkeypatch, tmp_path):
+    def senza_rete(*args, **kwargs):
+        raise AssertionError("nessuna richiesta di rete in questa modalita'")
+
+    monkeypatch.setattr(requests, "get", senza_rete)
+    monkeypatch.setattr(competitor_seo, "_scarica_grezzo", senza_rete)
+
+    report = competitor_seo.analizza_pagine_salvate([str(_cartella_pagine(tmp_path))])
+
+    assert "errore" not in report
+    assert report["sito"] == "https://esempio.it"
+    assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (1, 4)
+    assert {p["tipo"] for p in report["pagine"]} == {"home", "categoria", "prodotto"}
+    assert any("pagine salvate" in a for a in report["avvisi"])
+    prodotto = next(p for p in report["pagine"] if p["url"].endswith("telefono-1/"))
+    assert "descrizione propria con dettagli unici" in prodotto["estratto"]
+    assert "Spedizione gratuita" not in prodotto["estratto"]
+    assert report["messaggi_ripetuti_sul_sito"][0]["testo"] == SPEDIZIONE.lower()
+    # anche qui i testi restano disponibili per il controllo di somiglianza
+    assert text_similarity.carica_riferimenti("esempio.it")
+
+
+def test_pagine_salvate_accetta_anche_file_singoli_e_deduce_il_tipo_dai_dati(tmp_path):
+    cartella = tmp_path / "x"
+    cartella.mkdir()
+    pagina = _pagina_html("Telefono 9", "Telefono 9").replace("</head>", "</head>")
+    (cartella / "senza_indirizzo.html").write_text(pagina, encoding="utf-8")
+
+    report = competitor_seo.analizza_pagine_salvate(
+        [str(cartella / "senza_indirizzo.html")], sito="https://esempio.it"
+    )
+
+    assert report["sito"] == "https://esempio.it"
+    assert report["pagine"][0]["tipo"] == "prodotto"  # dal JSON-LD Product
+    assert report["pagine"][0]["url"].startswith("file://")
+    assert any("non dichiarano il proprio indirizzo" in a for a in report["avvisi"])
+
+
+def test_pagine_salvate_errori_prevedibili(tmp_path):
+    assert (
+        "non e' un file .html"
+        in competitor_seo.analizza_pagine_salvate([str(tmp_path / "non_esiste.html")])["errore"]
+    )
+    altro = tmp_path / "note.txt"
+    altro.write_text("non e' html")
+    assert "errore" in competitor_seo.analizza_pagine_salvate([str(altro)])
+    vuota = tmp_path / "vuota"
+    vuota.mkdir()
+    assert "Nessun file .html" in competitor_seo.analizza_pagine_salvate([str(vuota)])["errore"]

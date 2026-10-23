@@ -154,10 +154,17 @@ def controlla(
     }
 
 
+NOTA = (
+    "Il punteggio e' solo un riferimento per l'utilizzatore, non e' vincolante: la "
+    "responsabilita' dei testi pubblicati resta sua."
+)
+
+
 def _esito(punteggio: int, soglia: int | None) -> dict:
-    if soglia is None:
-        return {}
-    return {"soglia": soglia, "accettabile": punteggio <= soglia}
+    esito = {"nota": NOTA}
+    if soglia is not None:
+        esito.update({"soglia": soglia, "accettabile": punteggio <= soglia})
+    return esito
 
 
 # --- testi di riferimento salvati in locale ---------------------------------

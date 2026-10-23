@@ -33,10 +33,12 @@ import json
 import os
 import re
 import socket
+import subprocess
 import time
 from collections import Counter
 from datetime import date
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
@@ -126,56 +128,124 @@ def _decodifica(dati: bytes, codifica: str | None) -> str:
         return dati.decode("utf-8", errors="replace")
 
 
-def _scarica_grezzo(url: str, host_base: str) -> _Risposta:
+_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5"
+
+
+def _richiesta_requests(url: str) -> tuple[int, dict[str, str], bytes, str | None]:
+    """Una GET senza seguire i redirect: (status, intestazioni in minuscolo,
+    corpo fino a MAX_BYTE, codifica dichiarata)."""
+    try:
+        risposta = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT, "Accept": _ACCEPT},
+            timeout=TIMEOUT_SECONDI,
+            allow_redirects=False,
+            stream=True,
+        )
+    except requests.RequestException as errore:
+        raise ErroreAnalisi(f"{url}: {errore.__class__.__name__}") from errore
+    try:
+        dati = b""
+        for blocco in risposta.iter_content(65536):
+            dati += blocco
+            if len(dati) > MAX_BYTE:
+                break
+        intestazioni = {k.lower(): v for k, v in risposta.headers.items()}
+        return risposta.status_code, intestazioni, dati[:MAX_BYTE], risposta.encoding
+    finally:
+        risposta.close()
+
+
+def _separa_risposta_curl(grezzo: bytes) -> tuple[int, dict[str, str], bytes, str | None]:
+    """Interpreta l'output di `curl -i`: riga di stato, intestazioni, corpo."""
+    testa, _, corpo = grezzo.partition(b"\r\n\r\n")
+    while testa.startswith(b"HTTP/") and b" 100 " in testa.split(b"\r\n", 1)[0]:
+        testa, _, corpo = corpo.partition(b"\r\n\r\n")  # risposta provvisoria
+    righe = testa.decode("latin-1").split("\r\n")
+    stato = re.match(r"HTTP/\S+\s+(\d{3})", righe[0])
+    if not stato:
+        raise ErroreAnalisi("Risposta di curl non riconosciuta")
+    intestazioni = {}
+    for riga in righe[1:]:
+        nome, due_punti, valore = riga.partition(":")
+        if due_punti:
+            intestazioni[nome.strip().lower()] = valore.strip()
+    codifica = re.search(r"charset=([\w-]+)", intestazioni.get("content-type", ""), re.I)
+    return (
+        int(stato.group(1)),
+        intestazioni,
+        corpo[:MAX_BYTE],
+        codifica.group(1) if codifica else None,
+    )
+
+
+def _richiesta_curl(url: str) -> tuple[int, dict[str, str], bytes, str | None]:
+    """Come _richiesta_requests, ma con il programma `curl` (stesso User-Agent
+    dichiarato). Nessuna shell: gli argomenti sono una lista."""
+    comando = [
+        "curl",
+        "-sS",
+        "-i",
+        "--proto",
+        "=http,https",
+        "--max-time",
+        str(TIMEOUT_SECONDI),
+        "-A",
+        USER_AGENT,
+        "-H",
+        f"Accept: {_ACCEPT}",
+        url,
+    ]
+    try:
+        with subprocess.Popen(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as processo:
+            grezzo = processo.stdout.read(MAX_BYTE + 65536)
+            processo.kill()  # se il corpo e' piu' grande del tetto, non serve il resto
+            processo.wait()
+            errore = processo.stderr.read().decode("utf-8", errors="replace").strip()
+            if not grezzo:
+                raise ErroreAnalisi(f"{url}: curl senza risposta ({errore or 'nessun errore'})")
+    except FileNotFoundError as eccezione:
+        raise ErroreAnalisi("curl non e' installato su questa macchina") from eccezione
+    return _separa_risposta_curl(grezzo)
+
+
+def _scarica(url: str, host_base: str, richiesta) -> _Risposta:
     """GET con redirect gestiti a mano (restando sullo stesso dominio),
-    controllo della destinazione e tetto alla dimensione. Nessuna pausa e
-    nessun controllo di robots.txt: ci pensa _Scaricatore."""
+    controllo della destinazione e tetto alla dimensione, con il trasporto
+    `richiesta` (requests o curl). Nessuna pausa e nessun controllo di
+    robots.txt: ci pensa _Scaricatore."""
     for _ in range(MAX_REDIRECT + 1):
         _controlla_destinazione(url)
-        try:
-            risposta = requests.get(
-                url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5",
-                },
-                timeout=TIMEOUT_SECONDI,
-                allow_redirects=False,
-                stream=True,
-            )
-        except requests.RequestException as errore:
-            raise ErroreAnalisi(f"{url}: {errore.__class__.__name__}") from errore
-        try:
-            destinazione = risposta.headers.get("Location")
-            if risposta.status_code in (301, 302, 303, 307, 308) and destinazione:
-                url = urljoin(url, destinazione)
-                if _host_base(url) != host_base:
-                    raise ErroreAnalisi(f"Redirect verso un altro dominio: {url}")
-                continue
-            tipo = risposta.headers.get("Content-Type", "").lower()
-            if risposta.status_code == 200 and not any(t in tipo for t in ("text/", "xml", "json")):
-                raise ErroreAnalisi(f"{url}: contenuto non testuale ({tipo or 'sconosciuto'})")
-            dati = b""
-            for blocco in risposta.iter_content(65536):
-                dati += blocco
-                if len(dati) > MAX_BYTE:
-                    break
-            attesa = risposta.headers.get("Retry-After", "").strip()
-            return _Risposta(
-                risposta.status_code,
-                url,
-                _decodifica(dati[:MAX_BYTE], risposta.encoding),
-                float(attesa) if attesa.isdigit() else None,
-            )
-        finally:
-            risposta.close()
+        status, intestazioni, dati, codifica = richiesta(url)
+        destinazione = intestazioni.get("location")
+        if status in (301, 302, 303, 307, 308) and destinazione:
+            url = urljoin(url, destinazione)
+            if _host_base(url) != host_base:
+                raise ErroreAnalisi(f"Redirect verso un altro dominio: {url}")
+            continue
+        tipo = intestazioni.get("content-type", "").lower()
+        if status == 200 and not any(t in tipo for t in ("text/", "xml", "json")):
+            raise ErroreAnalisi(f"{url}: contenuto non testuale ({tipo or 'sconosciuto'})")
+        attesa = intestazioni.get("retry-after", "").strip()
+        return _Risposta(
+            status, url, _decodifica(dati, codifica), float(attesa) if attesa.isdigit() else None
+        )
     raise ErroreAnalisi(f"Troppi redirect: {url}")
+
+
+def _scarica_grezzo(url: str, host_base: str) -> _Risposta:
+    return _scarica(url, host_base, _richiesta_requests)
+
+
+def _scarica_grezzo_curl(url: str, host_base: str) -> _Risposta:
+    return _scarica(url, host_base, _richiesta_curl)
 
 
 class _Scaricatore:
     """Aggiunge a _scarica_grezzo il rispetto di robots.txt e la pausa."""
 
-    def __init__(self, url_iniziale: str):
+    def __init__(self, url_iniziale: str, usa_curl: bool = False):
+        self.usa_curl = usa_curl
         parti = urlsplit(url_iniziale)
         self.origine = f"{parti.scheme}://{parti.netloc}"
         self.host = _host_base(url_iniziale)
@@ -184,8 +254,13 @@ class _Scaricatore:
         self._pausa = PAUSA_SECONDI
         self._ultima = 0.0
 
+    def _scarica(self, url: str) -> _Risposta:
+        # Le funzioni di trasporto si cercano al momento della chiamata (i test le sostituiscono).
+        scarica = _scarica_grezzo_curl if self.usa_curl else _scarica_grezzo
+        return scarica(url, self.host)
+
     def carica_robots(self) -> None:
-        risposta = _scarica_grezzo(f"{self.origine}/robots.txt", self.host)
+        risposta = self._scarica(f"{self.origine}/robots.txt")
         if risposta.status >= 500:
             raise ErroreAnalisi(
                 f"robots.txt non leggibile (HTTP {risposta.status}): "
@@ -205,7 +280,7 @@ class _Scaricatore:
         if attesa > 0:
             time.sleep(attesa)
         try:
-            risposta = _scarica_grezzo(url, self.host)
+            risposta = self._scarica(url)
             # Se il sito chiede di rallentare si aspetta quanto indicato e si
             # ritenta una volta sola; se insiste, non si prosegue (vedi _analizza).
             if (
@@ -214,7 +289,7 @@ class _Scaricatore:
                 and risposta.retry_after <= RETRY_AFTER_MASSIMO_SECONDI
             ):
                 time.sleep(risposta.retry_after)
-                risposta = _scarica_grezzo(url, self.host)
+                risposta = self._scarica(url)
             return risposta
         finally:
             self._ultima = time.monotonic()
@@ -472,6 +547,7 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
         "dati_strutturati": _tipi_schema(estrattore.json_ld),
         "canonical": estrattore.canonical,
         "meta_robots": estrattore.meta.get("robots", ""),
+        "og_url": estrattore.meta.get("og:url", ""),
         "open_graph": "og:title" in estrattore.meta,
         "lingua": estrattore.lingua,
         "n_parole": estrattore.parole,
@@ -752,9 +828,51 @@ def _motivo_http(status: int) -> str:
     return f"HTTP {status}"
 
 
-def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: int) -> dict:
+def _avviso_javascript(home: dict) -> list[str]:
+    if home["h1"] or home["n_parole"] >= 50:
+        return []
+    return [
+        "La home ha quasi nessun testo e nessun H1 nell'HTML scaricato: il sito "
+        "probabilmente costruisce le pagine con JavaScript, e questa analisi (che non "
+        "esegue JavaScript) vede solo una parte di quello che vede Google."
+    ]
+
+
+def _chiudi_analisi(
+    origine: str,
+    pagine: list[dict],
+    saltate: list[dict],
+    sitemap: str | None,
+    urls_in_sitemap: dict[str, int],
+    avvisi: list[str],
+    max_caratteri: int,
+) -> dict:
+    """Parte comune a analizza_seo_sito e analizza_pagine_salvate: analisi del
+    testo, salvataggio dei testi per controlla_somiglianza e costruzione del report."""
+    avviso_identiche = _avviso_pagine_identiche(pagine)
+    if avviso_identiche:
+        avvisi.append(avviso_identiche)
+    testo = competitor_text.analizza_testi(pagine, max_caratteri)
+    # I testi analizzati restano in locale per controlla_somiglianza.
+    try:
+        text_similarity.salva_corpus(origine, [{**p, "testo": p["_testo_proprio"]} for p in pagine])
+        confronto = "Testi salvati in locale: usa controlla_somiglianza sui nostri testi."
+    except OSError as errore:
+        confronto = (
+            f"Testi non salvati ({errore.__class__.__name__}): controlla_somiglianza non li avra'."
+        )
+    report = _costruisci_report(
+        origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, testo, max_caratteri
+    )
+    report["controllo_somiglianza"] = confronto
+    return report
+
+
+def _analizza(
+    url: str, max_categorie: int, max_prodotti: int, max_caratteri: int, usa_curl: bool
+) -> dict:
     url = _normalizza_url(url)
-    scaricatore = _Scaricatore(url)
+    scaricatore = _Scaricatore(url, usa_curl)
     scaricatore.carica_robots()
 
     risposta_home = scaricatore.get(url)
@@ -765,12 +883,7 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: in
     )
     pagine = [home]
     avvisi: list[str] = []
-    if not home["h1"] and home["n_parole"] < 50:
-        avvisi.append(
-            "La home ha quasi nessun testo e nessun H1 nell'HTML scaricato: il sito "
-            "probabilmente costruisce le pagine con JavaScript, e questa analisi (che non "
-            "esegue JavaScript) vede solo una parte di quello che vede Google."
-        )
+    avvisi.extend(_avviso_javascript(home))
 
     trovati, sitemap = _urls_dalla_sitemap(scaricatore)
     if sitemap is None:
@@ -812,30 +925,13 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: in
         pagina, _ = _estrai_pagina(risposta.testo, risposta.url, tipo, scaricatore.host)
         pagine.append(pagina)
 
-    avviso_identiche = _avviso_pagine_identiche(pagine)
-    if avviso_identiche:
-        avvisi.append(avviso_identiche)
     if len(pagine) == 1 and not saltate:
         avvisi.append(
             "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
         )
-    testo = competitor_text.analizza_testi(pagine, max_caratteri)
-    # I testi analizzati restano in locale per controlla_somiglianza.
-    try:
-        text_similarity.salva_corpus(
-            scaricatore.origine,
-            [{**p, "testo": p["_testo_proprio"]} for p in pagine],
-        )
-        confronto = "Testi salvati in locale: usa controlla_somiglianza sui nostri testi."
-    except OSError as errore:
-        confronto = (
-            f"Testi non salvati ({errore.__class__.__name__}): controlla_somiglianza non li avra'."
-        )
-    report = _costruisci_report(
-        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, testo, max_caratteri
+    return _chiudi_analisi(
+        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi, max_caratteri
     )
-    report["controllo_somiglianza"] = confronto
-    return report
 
 
 def analizza_seo_sito(
@@ -843,8 +939,11 @@ def analizza_seo_sito(
     max_categorie: int = MAX_CATEGORIE_DEFAULT,
     max_prodotti: int = MAX_PRODOTTI_DEFAULT,
     caratteri_per_pagina: int = CARATTERI_DEFAULT,
+    usa_curl: bool = False,
 ) -> dict:
     """Analisi SEO a campione del sito `url`; vedi la docstring del modulo.
+    `usa_curl` fa le richieste con il programma curl invece che con requests
+    (stesso User-Agent dichiarato, stesse regole): e' una scelta dell'utente.
     I limiti sono accettati entro un tetto massimo (`caratteri_per_pagina` e'
     la lunghezza dell'estratto di testo di ogni pagina, 0 = nessun estratto).
     In caso di problemi
@@ -854,6 +953,110 @@ def analizza_seo_sito(
     max_prodotti = max(0, min(max_prodotti, TETTO_PRODOTTI))
     caratteri_per_pagina = max(0, min(caratteri_per_pagina, TETTO_CARATTERI))
     try:
-        return _analizza(url, max_categorie, max_prodotti, caratteri_per_pagina)
+        return _analizza(url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl)
     except ErroreAnalisi as errore:
+        return {"errore": str(errore)}
+
+
+# --- pagine salvate dall'utente ---------------------------------------------
+
+_ESTENSIONI_HTML = (".html", ".htm", ".xhtml")
+TETTO_PAGINE_SALVATE = 40
+
+
+def _file_html(percorsi: list[str]) -> list[Path]:
+    trovati: list[Path] = []
+    for percorso in percorsi:
+        voce = Path(percorso).expanduser()
+        if voce.is_dir():
+            trovati += sorted(
+                f for f in voce.iterdir() if f.is_file() and f.suffix.lower() in _ESTENSIONI_HTML
+            )
+        elif voce.is_file() and voce.suffix.lower() in _ESTENSIONI_HTML:
+            trovati.append(voce)
+        else:
+            raise ErroreAnalisi(
+                f"{percorso}: non e' un file .html/.htm ne' una cartella che ne contiene"
+            )
+    unici = list(dict.fromkeys(trovati))
+    if not unici:
+        raise ErroreAnalisi("Nessun file .html trovato nei percorsi indicati")
+    return unici[:TETTO_PAGINE_SALVATE]
+
+
+def _leggi_html(file: Path) -> str:
+    with file.open("rb") as aperto:
+        dati = aperto.read(MAX_BYTE)
+    try:
+        return dati.decode("utf-8")
+    except UnicodeDecodeError:
+        return dati.decode("cp1252", errors="replace")
+
+
+def _tipo_pagina_salvata(pagina: dict) -> str:
+    """Tipo dedotto dall'indirizzo che la pagina dichiara e, se non basta, dai
+    suoi dati strutturati."""
+    percorso = urlsplit(pagina["url"]).path
+    if urlsplit(pagina["url"]).scheme in ("http", "https") and percorso in ("", "/"):
+        return "home"
+    tipo = _tipo_da_percorso(pagina["url"])
+    if tipo:
+        return tipo
+    schema = set(pagina["dati_strutturati"])
+    if schema & {"Product", "ProductGroup"}:
+        return "prodotto"
+    if schema & {"CollectionPage", "OfferCatalog", "ItemList"}:
+        return "categoria"
+    return "altro"
+
+
+def _analizza_salvate(percorsi: list[str], sito: str, max_caratteri: int) -> dict:
+    pagine: list[dict] = []
+    avvisi = [
+        "Analisi di pagine salvate dall'utente: nessuna richiesta al sito, nessuna sitemap; "
+        "il campione e' quello che e' stato salvato."
+    ]
+    senza_indirizzo = 0
+    origine = ""
+    for file in _file_html(percorsi):
+        testo = _leggi_html(file)
+        prima, _ = _estrai_pagina(testo, file.as_uri(), "altro", "")
+        url = prima["canonical"] or prima["og_url"]
+        if urlsplit(url).scheme not in ("http", "https"):
+            url = file.as_uri()
+            senza_indirizzo += 1
+        host = _host_base(url)
+        pagina, _ = _estrai_pagina(testo, url, "altro", host)
+        pagina["tipo"] = _tipo_pagina_salvata(pagina)
+        if host and not origine:
+            parti = urlsplit(url)
+            origine = f"{parti.scheme}://{parti.netloc}"
+        pagine.append(pagina)
+
+    if senza_indirizzo:
+        avvisi.append(
+            f"{senza_indirizzo} pagine non dichiarano il proprio indirizzo (canonical/og:url): "
+            "tipo dedotto solo dai dati strutturati, e non e' possibile riconoscere la home."
+        )
+    for home in (p for p in pagine if p["tipo"] == "home"):
+        avvisi.extend(_avviso_javascript(home))
+    origine = origine or sito.strip() or "pagine_salvate"
+    return _chiudi_analisi(origine, pagine, [], None, {}, avvisi, max_caratteri)
+
+
+def analizza_pagine_salvate(
+    percorsi: list[str],
+    sito: str = "",
+    caratteri_per_pagina: int = CARATTERI_DEFAULT,
+) -> dict:
+    """Stessa analisi di analizza_seo_sito su pagine .html salvate dall'utente
+    dal proprio browser (file singoli o cartelle), senza nessuna richiesta di
+    rete. Per i siti che non vogliono essere letti da strumenti automatici o che
+    costruiscono le pagine con JavaScript. Il tipo di pagina (home, categoria,
+    prodotto) si deduce dall'indirizzo che la pagina dichiara; `sito` e' solo
+    un'etichetta per le pagine che non lo dichiarano."""
+    caratteri_per_pagina = max(0, min(caratteri_per_pagina, TETTO_CARATTERI))
+    try:
+        return _analizza_salvate(percorsi, sito, caratteri_per_pagina)
+    except (ErroreAnalisi, OSError) as errore:
         return {"errore": str(errore)}

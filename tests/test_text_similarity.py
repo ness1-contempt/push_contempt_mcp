@@ -186,3 +186,9 @@ def test_il_testo_salvato_ha_un_tetto():
     )
     [riferimento] = carica_riferimenti("grande.it")
     assert len(riferimento["testo"]) == text_similarity.MAX_CARATTERI_PAGINA_SALVATA
+
+
+def test_il_risultato_ricorda_che_il_punteggio_non_e_vincolante():
+    for risultato in (controlla(ORIGINALE, _ref()), controlla("Poche parole qui", _ref())):
+        assert "non e' vincolante" in risultato["nota"]
+        assert "responsabilita'" in risultato["nota"]

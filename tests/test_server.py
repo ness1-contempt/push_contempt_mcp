@@ -32,6 +32,7 @@ async def test_list_tools():
             "leggi_analisi_seo_yoast",
             "analizza_seo_sito",
             "controlla_somiglianza",
+            "analizza_pagine_salvate",
             "lista_ordini",
             "dettaglio_ordine",
         }

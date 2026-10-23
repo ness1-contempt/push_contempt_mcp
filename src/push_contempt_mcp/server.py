@@ -98,6 +98,12 @@ def crea_prodotto(
     pubblicato: resta da rivedere e pubblicare da wp-admin (vedi
     prodotti_in_bozza e la tab "Carica prodotti" del plugin), quindi non
     serve invalidare la cache del sito.
+
+    Se i testi nascono da un'analisi di un sito concorrente (analizza_seo_sito o
+    analizza_pagine_salvate), PRIMA di chiamare questo tool: controllali con
+    controlla_somiglianza, mostra all'utente punteggio e passaggi, spiegagli la
+    scala 0-9 e fagli scegliere il livello che accetta; applica solo dopo la sua
+    scelta. Il punteggio e' un riferimento, la responsabilita' e' sua.
     """
     return product_tools.crea_prodotto(
         titolo,
@@ -244,6 +250,12 @@ def aggiorna_seo_prodotto(
     (sovrascrive i valori esistenti). Restituisce prima/dopo per controllo,
     perché l'effetto è pubblico (quello che Google mostra in SERP). Invalida
     anche la cache del sito.
+
+    Se i testi nascono da un'analisi di un sito concorrente (analizza_seo_sito o
+    analizza_pagine_salvate), PRIMA di chiamare questo tool: controllali con
+    controlla_somiglianza, mostra all'utente punteggio e passaggi, spiegagli la
+    scala 0-9 e fagli scegliere il livello che accetta; applica solo dopo la sua
+    scelta. Il punteggio e' un riferimento, la responsabilita' e' sua.
     """
     risultato = seo_tools.aggiorna_seo_prodotto(
         prodotto_id, titolo_seo, meta_description, parola_chiave_focus
@@ -268,6 +280,7 @@ def analizza_seo_sito(
     max_categorie: int = 3,
     max_prodotti: int = 10,
     caratteri_per_pagina: int = 600,
+    usa_curl: bool = False,
 ) -> dict:
     """Analizza a campione il sito di un altro negozio (di norma un concorrente)
     per capire come e' fatta la sua SEO e come descrive i prodotti: scarica la
@@ -291,15 +304,42 @@ def analizza_seo_sito(
     i nostri prodotti, con parole tue: gli estratti servono ad analizzare, non
     a riusare. Mai copiare frasi, titoli o description del concorrente, e solo
     cose vere sui nostri prodotti. Prima di applicare i testi con i tool SEO
-    (aggiorna_seo_prodotto, crea_prodotto) passali a controlla_somiglianza e
-    mostra all'utente anche l'anteprima.
+    (aggiorna_seo_prodotto, crea_prodotto) passali a controlla_somiglianza, fai
+    scegliere all'utente il livello di somiglianza che accetta e mostragli
+    l'anteprima.
 
     `caratteri_per_pagina` e' la lunghezza dell'estratto di ogni pagina (0 =
     nessun estratto, massimo 2000): e' quello che pesa sui token del report.
     `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
     I testi analizzati restano salvati in locale per controlla_somiglianza.
+
+    `usa_curl`: fa le richieste con il programma curl invece che con la libreria
+    Python (stesso User-Agent dichiarato, stesso rispetto di robots.txt, pause e
+    Retry-After: se il sito risponde ancora 429 si ferma). Usalo SOLO se l'utente
+    lo chiede esplicitamente, tipicamente per un sito che risponde 429 alla
+    libreria ma non a curl: e' una sua scelta e una sua responsabilita'.
+    Non cambiare User-Agent e non aggirare altri blocchi.
     """
-    return competitor_seo.analizza_seo_sito(url, max_categorie, max_prodotti, caratteri_per_pagina)
+    return competitor_seo.analizza_seo_sito(
+        url, max_categorie, max_prodotti, caratteri_per_pagina, usa_curl
+    )
+
+
+@mcp.tool()
+def analizza_pagine_salvate(
+    percorsi: list[str], sito: str = "", caratteri_per_pagina: int = 600
+) -> dict:
+    """Stessa analisi di analizza_seo_sito (campi SEO, vocabolario, stile e
+    intenzione, estratti) su pagine .html SALVATE dall'utente dal proprio
+    browser (file singoli o cartelle), senza nessuna richiesta di rete. Serve per
+    i siti che bloccano gli strumenti automatici o costruiscono le pagine con
+    JavaScript (salvare la pagina gia' caricata). Il tipo di pagina (home,
+    categoria, prodotto) si deduce dall'indirizzo che la pagina dichiara; `sito`
+    e' solo un'etichetta per quelle che non lo dichiarano. Valgono le stesse
+    regole d'uso di analizza_seo_sito: testi originali, mai copiati, e
+    controlla_somiglianza prima di applicarli.
+    """
+    return competitor_seo.analizza_pagine_salvate(percorsi, sito, caratteri_per_pagina)
 
 
 @mcp.tool()
@@ -322,10 +362,14 @@ def controlla_somiglianza(
     tecniche e nomi di prodotto uguali alzano un po' il punteggio anche in un
     testo originale: guarda `passaggi_simili` per distinguere.
 
-    `soglia` (0-9) e' il massimo che l'UTILIZZATORE accetta: chiedigliela, non
-    sceglierla tu; con la soglia il risultato include `accettabile`. Se il testo
-    non la rispetta, riscrivilo con parole tue (cambiando struttura delle frasi,
-    non solo sostituendo qualche parola) e ricontrolla.
+    Il punteggio e' SOLO UN RIFERIMENTO per l'utilizzatore, non e' vincolante e la
+    responsabilita' dei testi pubblicati e' sua. Per questo: PRIMA di applicare
+    qualsiasi modifica ai prodotti, mostragli punteggio, significato e passaggi
+    simili, spiegagli la scala e chiedigli quale livello accetta (`soglia`, 0-9);
+    non sceglierla tu e non applicare nulla finche' non ha deciso. Con la soglia
+    il risultato include `accettabile`. Se il testo la supera, proponi una
+    riscrittura con parole tue (cambiando la struttura delle frasi, non solo
+    qualche parola) e ricontrolla; l'ultima parola e' dell'utente.
     `sito` limita il confronto a un sito (es. "casualbay.it"); vuoto = tutti quelli
     analizzati. `riferimenti` aggiunge testi da confrontare a mano.
     """

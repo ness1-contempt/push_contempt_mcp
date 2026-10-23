@@ -106,9 +106,15 @@ Copia `.env.example` in `.env` e compila:
   l'assistente giudica intenzione e tono. Le formule ripetute su tutto il sito
   (spedizioni, resi, "aggiungi al carrello") sono separate dai contenuti. Gira
   sul tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
-  richieste e non esegue JavaScript. Rifiuta reti private; per provarlo su un
+  richieste e non esegue JavaScript. Con `usa_curl` (scelta esplicita dell'utente) fa
+  le richieste con il programma `curl`, sempre con il nostro User-Agent dichiarato; se
+  il sito risponde ancora 429 si ferma, non aggira i blocchi. Rifiuta reti private; per provarlo su un
   sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`. Vocabolario ed estratti
   servono ad analizzare: i testi nostri vanno scritti con parole proprie.
+- `analizza_pagine_salvate` — la stessa analisi su pagine `.html` salvate
+  dall'utente dal proprio browser (file o cartelle), senza nessuna richiesta
+  di rete: per i siti che bloccano gli strumenti automatici o si costruiscono
+  con JavaScript.
 - `controlla_somiglianza` — misura quanto un testo nostro somiglia ai testi di
   un sito analizzato con `analizza_seo_sito` (salvati in locale dopo ogni
   analisi) o a testi dati a mano, su una scala da 0 (nessuna somiglianza) a 9
@@ -117,7 +123,9 @@ Copia `.env.example` in `.env` e compila:
   La `soglia` (0-9) è il massimo che l'utilizzatore accetta: con essa il
   risultato dice anche se il testo è accettabile. Specifiche tecniche uguali
   alzano un po' il punteggio anche in testi originali, per questo i passaggi
-  sono elencati e il giudizio finale resta all'utilizzatore.
+  sono elencati e il giudizio finale resta all'utilizzatore. Il punteggio è solo
+  un riferimento, non vincolante: va mostrato all'utente e il livello accettato
+  scelto da lui prima di applicare qualsiasi modifica ai prodotti.
 
 **Manutenzione**
 - `purga_cache_sito` — invalida manualmente la cache del sito (gli altri
