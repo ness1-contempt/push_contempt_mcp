@@ -1143,6 +1143,9 @@ def _analizza(
     else:
         trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
     link_tutti = list(link_home)
+    # La pagina da cui si parte non e' un elemento del campione (la sitemap la elenca, a volte).
+    iniziale = risposta_home.url.rstrip("/")
+    trovati = {t: [u for u in v if u.rstrip("/") != iniziale] for t, v in trovati.items()}
     if perimetro:
         # Si analizza solo la sezione indicata: sitemap e link restano dentro il suo percorso.
         trovati = {t: [u for u in v if _nel_perimetro(u, perimetro)] for t, v in trovati.items()}
@@ -1161,20 +1164,22 @@ def _analizza(
             da_home[tipo].append(link)
     for tipo in da_home:
         trovati[tipo] = _senza_varianti_lingua(trovati[tipo] or da_home[tipo])
-    if perimetro and not trovati["prodotto"] and not trovati["categoria"]:
-        # Sotto il percorso indicato non c'e' niente (prodotti e liste stanno altrove, es.
-        # /l/smartphone/... e /p/...): si campiona fra cio' che la pagina stessa collega.
+    if perimetro and not trovati["prodotto"]:
+        # Sotto il percorso indicato non ci sono prodotti (stanno altrove, es. /l/smartphone/...
+        # con i prodotti in /p/...): si campiona fra cio' che la pagina stessa collega.
         da_pagina: dict[str, list[str]] = {"categoria": [], "prodotto": []}
         for link in link_tutti:
             tipo = _tipo_da_percorso(link)
-            if tipo:
+            if tipo and link.rstrip("/") != iniziale:
                 da_pagina[tipo].append(link)
-        if da_pagina["categoria"] or da_pagina["prodotto"]:
-            trovati = {t: _senza_varianti_lingua(v) for t, v in da_pagina.items()}
+        if da_pagina["prodotto"] or (da_pagina["categoria"] and not trovati["categoria"]):
+            trovati["prodotto"] = _senza_varianti_lingua(da_pagina["prodotto"])
+            if not trovati["categoria"]:
+                trovati["categoria"] = _senza_varianti_lingua(da_pagina["categoria"])
             campione_da_link = True
             avvisi.append(
-                "Nessuna categoria o prodotto sotto il percorso indicato: il campione e' scelto "
-                "fra quelli collegati da quella pagina."
+                "Nessun prodotto sotto il percorso indicato: il campione e' scelto fra quelli "
+                "collegati da quella pagina."
             )
     if not trovati["prodotto"] and not campione_da_link:
         gruppo, tratto = _gruppo_dominante(altri)

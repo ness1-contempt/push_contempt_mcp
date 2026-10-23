@@ -1646,6 +1646,11 @@ def _elenco_con_prodotti_altrove():
 
 def test_se_sotto_il_percorso_non_c_e_niente_si_usano_i_link_della_pagina(monkeypatch):
     sito, elenco, prodotti, liste = _elenco_con_prodotti_altrove()
+    # come su Back Market: la sitemap elenca anche la pagina da cui si parte (e' un'"elenco")
+    sito["https://esempio.it/sitemap.xml"] = (
+        200,
+        f"<urlset><url><loc>{elenco}</loc></url><url><loc>https://esempio.it/it-it/chi-siamo</loc></url></urlset>",
+    )
     _sito_finto(monkeypatch, sito)
 
     report = analizza_seo_sito(elenco, max_prodotti=30)
@@ -1654,6 +1659,9 @@ def test_se_sotto_il_percorso_non_c_e_niente_si_usano_i_link_della_pagina(monkey
     assert (report["campione"]["categorie"], report["campione"]["prodotti"]) == (3, 14)
     assert {p["url"] for p in report["pagine"][1:]} == set(prodotti) | set(liste)
     assert any("collegati da quella pagina" in a for a in report["avvisi"])
+    assert elenco not in [
+        p["url"] for p in report["pagine"][1:]
+    ]  # la pagina iniziale non si ripete
     # la sitemap e' stata letta, quindi il criterio resta valutabile
     criteri = [c["criterio"] for c in report["valutazione"]["aree"]["tecnico"]["criteri"]]
     assert "sitemap" in criteri
