@@ -28,8 +28,10 @@ PESI_AREE = {
     "intestazioni": 1,
     "dati_strutturati": 2,
     "contenuto": 2,
-    "tecnico": 1,
+    "tecnico": 0.5,  # HTTPS, canonical, lingua... sono di serie su ogni piattaforma moderna
 }
+RIGHE_SCHEDA_MIN = 3  # righe "etichetta: valore" per dire che la scheda e' organizzata
+PAROLE_PROPRIE_MIN = 60  # in alternativa: abbastanza testo proprio
 
 SIGNIFICATO = {
     0: "Struttura SEO quasi assente: non e' un modello.",
@@ -122,38 +124,39 @@ def _sembra_scheda_incollata(meta: str) -> bool:
 
 
 def _meta(pagine: list[dict]) -> list[dict]:
+    """Una meta description conta solo se e' scritta per essere letta: una scheda
+    incollata ("CODICE: 12TAGLIA: M...") e' presente ma inutile, e non guadagna
+    credito per lunghezza o unicita'."""
     if not pagine:
         return []
     con_meta = [p for p in pagine if p["meta_description"]]
+    utili = [p for p in con_meta if not _sembra_scheda_incollata(p["meta_description"])]
+    incollate = len(con_meta) - len(utili)
+    dettaglio = f"{len(con_meta)} presenti"
+    if incollate:
+        dettaglio += f", {incollate} sembrano la scheda incollata"
+    dettaglio += _dettaglio_per_tipo(pagine)
     criteri = [
         _criterio(
-            "meta description presente",
-            _quota(len(con_meta), len(pagine)),
-            f"pagine con meta description: {len(con_meta)} su {len(pagine)}"
-            + _dettaglio_per_tipo(pagine),
+            "meta description utile",
+            _quota(len(utili), len(pagine)),
+            f"pagine con una meta description utile: {len(utili)} su {len(pagine)} ({dettaglio})",
             peso=3,
         )
     ]
-    if con_meta:
-        nel_range = sum(META_MIN <= len(p["meta_description"]) <= META_MAX for p in con_meta)
-        incollate = sum(_sembra_scheda_incollata(p["meta_description"]) for p in con_meta)
-        distinte = len({p["meta_description"] for p in con_meta})
+    if utili:
+        nel_range = sum(META_MIN <= len(p["meta_description"]) <= META_MAX for p in utili)
+        distinte = len({p["meta_description"] for p in utili})
         criteri += [
             _criterio(
                 "lunghezza adatta",
-                _quota(nel_range, len(con_meta)),
-                f"meta fra {META_MIN} e {META_MAX} caratteri: {nel_range} su {len(con_meta)}",
-            ),
-            _criterio(
-                "scritta per essere letta",
-                1 - _quota(incollate, len(con_meta)),
-                f"meta che sembrano la scheda incollata: {incollate} su {len(con_meta)}",
-                peso=2,
+                _quota(nel_range, len(utili)),
+                f"meta fra {META_MIN} e {META_MAX} caratteri: {nel_range} su {len(utili)}",
             ),
             _criterio(
                 "diversa da pagina a pagina",
-                _quota(distinte, len(con_meta)),
-                f"meta description distinte: {distinte} su {len(con_meta)}",
+                _quota(distinte, len(utili)),
+                f"meta description distinte: {distinte} su {len(utili)}",
             ),
         ]
     return criteri
@@ -271,10 +274,10 @@ def _contenuto(pagine: list[dict]) -> list[dict]:
     if prodotti:
         n = len(prodotti)
         parole = sum(p["parole_proprie"] for p in prodotti) / n
-        strutturati = sum(
-            p["struttura"]["voci_di_elenco"] >= 3
+        organizzati = sum(
+            p["righe_scheda"] >= RIGHE_SCHEDA_MIN
             or p["struttura"]["tabelle_o_liste_specifiche"] >= 1
-            or p["struttura"]["paragrafi"] >= 3
+            or p["parole_proprie"] >= PAROLE_PROPRIE_MIN
             for p in prodotti
         )
         con_descrizione = sum(bool(p["dati_prodotto"].get("descrizione")) for p in prodotti)
@@ -286,9 +289,10 @@ def _contenuto(pagine: list[dict]) -> list[dict]:
                 peso=2,
             ),
             _criterio(
-                "descrizioni organizzate",
-                _quota(strutturati, n),
-                f"prodotti con elenchi, tabelle o paragrafi: {strutturati} su {n}",
+                "scheda organizzata o ricca",
+                _quota(organizzati, n),
+                f"prodotti con {RIGHE_SCHEDA_MIN}+ righe 'etichetta: valore', una tabella o "
+                f"{PAROLE_PROPRIE_MIN}+ parole proprie: {organizzati} su {n}",
             ),
             _criterio(
                 "descrizione nei dati strutturati",

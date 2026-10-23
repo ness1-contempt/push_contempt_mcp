@@ -17,6 +17,7 @@ def pagina(tipo="prodotto", i=0, **campi):
         "dati_prodotto": {"descrizione": "Un telefono", "con_valutazioni": True},
         "struttura": {"paragrafi": 5, "voci_di_elenco": 6, "tabelle_o_liste_specifiche": 1},
         "parole_proprie": 200,
+        "righe_scheda": 5,
         "immagini": 4,
         "immagini_senza_alt": 0,
         "canonical": f"https://esempio.it/p/{i}/",
@@ -50,6 +51,7 @@ def sito_scadente():
         dati_prodotto={},
         struttura={"paragrafi": 0, "voci_di_elenco": 0, "tabelle_o_liste_specifiche": 0},
         parole_proprie=10,
+        righe_scheda=0,
         immagini_senza_alt=4,
         canonical="",
         lingua="",
@@ -82,8 +84,10 @@ def test_un_sito_scadente_prende_un_punteggio_basso_con_le_prove():
     assert aree["meta_description"]["punteggio"] == 0
     assert aree["dati_strutturati"]["punteggio"] <= 1
     evidenze = {c["criterio"]: c["evidenza"] for a in aree.values() for c in a["criteri"]}
-    assert evidenze["meta description presente"].startswith("pagine con meta description: 0 su 6")
-    assert "home: nessuna" in evidenze["meta description presente"]
+    assert evidenze["meta description utile"].startswith(
+        "pagine con una meta description utile: 0 su 6"
+    )
+    assert "home: nessuna" in evidenze["meta description utile"]
     assert evidenze["titoli diversi fra loro"] == "titoli distinti: 1 su 6"
     assert evidenze["sitemap"] == "nessuna sitemap trovata"
     assert evidenze["immagini con testo alternativo"] == "immagini senza ALT: 24 su 24"
@@ -120,8 +124,13 @@ def test_meta_incollata_dalla_scheda_pesa_sul_punteggio():
     pagine = [pagina("prodotto", i, meta_description=scheda + f" {i}") for i in range(6)]
     meta = valuta(pagine, True, True)["aree"]["meta_description"]
     evidenze = {c["criterio"]: c["evidenza"] for c in meta["criteri"]}
-    assert evidenze["scritta per essere letta"] == "meta che sembrano la scheda incollata: 6 su 6"
-    assert meta["punteggio"] < 6
+    # presente ma inutile: non vale come meta description, e non guadagna credito per
+    # lunghezza o unicita'
+    assert evidenze["meta description utile"] == (
+        "pagine con una meta description utile: 0 su 6 (6 presenti, 6 sembrano la scheda incollata)"
+    )
+    assert [c["criterio"] for c in meta["criteri"]] == ["meta description utile"]
+    assert meta["punteggio"] == 0
 
 
 def test_aree_senza_dati_non_hanno_punteggio_e_non_contano_nel_totale():
@@ -164,3 +173,27 @@ def test_i_valori_dei_criteri_stanno_fra_0_e_1_e_il_punteggio_fra_0_e_9():
                 assert (
                     0 <= criterio["valore"] <= 1 and criterio["peso"] > 0 and criterio["evidenza"]
                 )
+
+
+def test_scheda_organizzata_si_misura_su_righe_etichetta_valore_tabelle_o_testo():
+    vuota = {"paragrafi": 0, "voci_di_elenco": 0, "tabelle_o_liste_specifiche": 0}
+
+    def organizzata(**campi):
+        base = {"parole_proprie": 10, "righe_scheda": 0, "struttura": vuota}
+        pagine = [pagina("prodotto", i, **{**base, **campi}) for i in range(4)]
+        contenuto = valuta(pagine, True, True)["aree"]["contenuto"]
+        return next(
+            c for c in contenuto["criteri"] if c["criterio"] == "scheda organizzata o ricca"
+        )
+
+    assert organizzata()["valore"] == 0  # poco testo, niente righe, niente tabella
+    assert organizzata(righe_scheda=5)["valore"] == 1  # scheda a campi fissi
+    assert organizzata(struttura={**vuota, "voci_di_elenco": 40})["valore"] == 0  # menu non contano
+    assert organizzata(struttura={**vuota, "tabelle_o_liste_specifiche": 1})["valore"] == 1
+    assert organizzata(parole_proprie=90)["valore"] == 1  # abbastanza testo proprio
+
+
+def test_l_area_tecnica_pesa_meno_perche_e_di_serie_sulle_piattaforme():
+    assert seo_scorecard.PESI_AREE["tecnico"] < min(
+        peso for area, peso in seo_scorecard.PESI_AREE.items() if area != "tecnico"
+    )
