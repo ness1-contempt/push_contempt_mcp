@@ -18,6 +18,7 @@ from push_contempt_mcp import (
     browser_tools,
     cache_tools,
     catalog_health,
+    competitor_seo,
     inventory_tools,
     order_tools,
     pricing_tools,
@@ -258,6 +259,31 @@ def leggi_analisi_seo_yoast(prodotto_id: int) -> dict:
     uscita, lunghezza minima del testo) prima di considerare chiuso il lavoro.
     """
     return browser_tools.leggi_analisi_seo_yoast(prodotto_id)
+
+
+@mcp.tool()
+def analizza_seo_sito(url: str, max_categorie: int = 3, max_prodotti: int = 10) -> dict:
+    """Analizza a campione la SEO del sito di un altro negozio (di norma un
+    concorrente) per prendere SPUNTO dai suoi schemi: scarica la home, la
+    sitemap, qualche categoria e una decina di prodotti e restituisce un
+    report compatto (struttura e lunghezze di titoli e meta description,
+    H1/H2 ricorrenti, dati strutturati, parole chiave ricorrenti, qualita'
+    degli ALT) piu' le singole pagine analizzate.
+
+    Rispetta robots.txt, si presenta con uno User-Agent riconoscibile e fa
+    una pausa fra le richieste (l'analisi dura qualche decina di secondi).
+    Non esegue JavaScript: se il sito costruisce le pagine cosi', il report
+    lo segnala fra gli `avvisi`. Rifiuta indirizzi di reti private. Del testo
+    delle pagine restituisce solo il conteggio parole.
+
+    Usa il report come ispirazione sugli schemi (come sono fatti i titoli, quali
+    temi trattano, che struttura usano), MAI per copiare titoli, description o
+    descrizioni del concorrente, e scrivi solo cose vere sui nostri prodotti.
+    I testi proposti vanno poi applicati con i tool SEO esistenti
+    (aggiorna_seo_prodotto, crea_prodotto), mostrando prima l'anteprima.
+    `max_categorie` e `max_prodotti` alzano il campione fino a un tetto (10 e 30).
+    """
+    return competitor_seo.analizza_seo_sito(url, max_categorie, max_prodotti)
 
 
 @mcp.tool()

@@ -94,6 +94,14 @@ Copia `.env.example` in `.env` e compila:
 - `aggiorna_seo_categoria` — stessa cosa per le categorie prodotto
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).
+- `analizza_seo_sito` — analisi a campione del sito di un altro negozio per
+  prendere spunto dai suoi schemi SEO (home, sitemap, qualche categoria,
+  una decina di prodotti): struttura e lunghezze di titoli e meta
+  description, H1/H2 ricorrenti, dati strutturati, parole chiave. Gira sul
+  tuo PC, non sul sito WordPress; rispetta `robots.txt`, fa una pausa fra le
+  richieste, non esegue JavaScript e del testo delle pagine restituisce solo
+  il conteggio parole (spunto sugli schemi, non da copiare). Rifiuta reti
+  private; per provarlo su un sito locale `SEO_ANALISI_CONSENTI_RETE_PRIVATA=1`.
 
 **Manutenzione**
 - `purga_cache_sito` — invalida manualmente la cache del sito (gli altri
@@ -121,6 +129,7 @@ Copia `.env.example` in `.env` e compila:
 - `src/push_contempt_mcp/sales_tools.py` — report vendite: client REST
 - `src/push_contempt_mcp/catalog_health.py` — salute catalogo: client REST
 - `src/push_contempt_mcp/seo_tools.py` — lettura/scrittura campi SEO Yoast: client REST
+- `src/push_contempt_mcp/competitor_seo.py` — analisi SEO a campione del sito di un concorrente (solo libreria standard + `requests`)
 - `src/push_contempt_mcp/product_sync.py` — scansione cartella prodotti locale (lettura diretta dal DB, solo confronto nomi)
 - `src/push_contempt_mcp/browser_tools.py` — automazione Playwright per le operazioni ancora manuali (prezzo singolo con anteprima, SEO categoria)
 - `src/push_contempt_mcp/cache_tools.py` — invalidazione cache del sito dopo una scrittura

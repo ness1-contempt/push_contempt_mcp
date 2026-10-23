@@ -1,0 +1,671 @@
+"""Analisi SEO "a campione" del sito di un altro negozio, per prendere spunto
+dagli schemi che usa (struttura dei titoli, lunghezze, temi, dati strutturati).
+
+Gira sulla macchina dell'utente, non sul sito WordPress (l'hosting spesso
+blocca le richieste in uscita, vedi Altervista), e senza AI: scarica poche
+pagine, ne estrae i campi SEO con codice normale e restituisce un report
+compatto. Chi lo chiama (l'assistente AI) legge solo il riassunto, quindi il
+costo in token non dipende da quante pagine vengono scaricate.
+
+Scelte di progetto:
+- Campione fisso e piccolo (home, sitemap, qualche categoria, una decina di
+  prodotti); i limiti sono parametri, con un tetto massimo.
+- Rispetta robots.txt (compreso Crawl-delay), si presenta con uno User-Agent
+  riconoscibile, fa una pausa fra una richiesta e l'altra e non esce dal
+  dominio indicato.
+- Del testo delle pagine restituisce solo il conteggio parole, mai il
+  contenuto: il report e' uno spunto sugli schemi, non una copia.
+- Rifiuta indirizzi di reti private (localhost, 192.168.x.x, ...) per non
+  usare lo strumento contro risorse interne; per provarlo su un sito locale
+  impostare SEO_ANALISI_CONSENTI_RETE_PRIVATA=1.
+"""
+
+import html
+import ipaddress
+import json
+import os
+import re
+import socket
+import time
+from collections import Counter
+from datetime import date
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.robotparser import RobotFileParser
+
+import requests
+
+USER_AGENT_TOKEN = "push_contempt_mcp-seo"
+USER_AGENT = f"{USER_AGENT_TOKEN}/0.1 (+https://github.com/ness1-contempt/push_contempt_mcp)"
+
+PAUSA_SECONDI = 1.0
+PAUSA_MASSIMA_SECONDI = 10.0
+TIMEOUT_SECONDI = 10
+MAX_BYTE = 1_500_000
+MAX_REDIRECT = 3
+MAX_SITEMAP_FIGLIE = 2
+
+MAX_CATEGORIE_DEFAULT = 3
+MAX_PRODOTTI_DEFAULT = 10
+TETTO_CATEGORIE = 10
+TETTO_PRODOTTI = 30
+
+_SEPARATORI_TITOLO = (" | ", " - ", " – ", " — ", " • ", " · ")
+_PAROLE_VUOTE = frozenset(
+    "della delle degli dello dell alla alle agli allo come anche con per tra fra che non "
+    "una uno gli del dei nel nei nelle sul sulle questo questa questi queste tutti tutte "
+    "dal dai dalla piu the and for with from your you our this that are not all new "
+    "shop store online home".split()
+)
+
+_FRAGMENT_CATEGORIA = ("/product-category/", "/categoria-prodotto/", "/categoria/", "/category/")
+_FRAGMENT_COLLEZIONE = ("/collections/", "/collection/")
+_FRAGMENT_PRODOTTO = ("/product/", "/products/", "/prodotto/", "/prodotti/")
+
+
+class ErroreAnalisi(Exception):
+    """Errore atteso (rete, robots.txt, URL non valido): finisce nel report."""
+
+
+class _Risposta:
+    def __init__(self, status: int, url: str, testo: str):
+        self.status = status
+        self.url = url
+        self.testo = testo
+
+
+# --- rete -------------------------------------------------------------------
+
+
+def _host_base(url: str) -> str:
+    host = (urlsplit(url).hostname or "").lower()
+    return host.removeprefix("www.")
+
+
+def _normalizza_url(url: str) -> str:
+    url = url.strip()
+    if not url:
+        raise ErroreAnalisi("URL vuoto")
+    if "://" not in url:
+        url = f"https://{url}"
+    parti = urlsplit(url)
+    if parti.scheme not in ("http", "https") or not parti.hostname:
+        raise ErroreAnalisi(f"URL non valido: {url} (servono http:// o https://)")
+    return url if parti.path else urlunsplit(parti._replace(path="/"))
+
+
+def _risolvi(host: str) -> list[str]:
+    try:
+        return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
+    except socket.gaierror as errore:
+        raise ErroreAnalisi(f"Dominio non raggiungibile: {host} ({errore})") from errore
+
+
+def _controlla_destinazione(url: str) -> None:
+    if os.environ.get("SEO_ANALISI_CONSENTI_RETE_PRIVATA") == "1":
+        return
+    host = urlsplit(url).hostname or ""
+    for indirizzo in _risolvi(host):
+        if not ipaddress.ip_address(indirizzo.split("%")[0]).is_global:
+            raise ErroreAnalisi(
+                f"{host} punta a una rete privata o locale ({indirizzo}): "
+                "per sicurezza l'analisi e' solo per siti pubblici."
+            )
+
+
+def _decodifica(dati: bytes, codifica: str | None) -> str:
+    try:
+        return dati.decode(codifica or "utf-8", errors="replace")
+    except LookupError:
+        return dati.decode("utf-8", errors="replace")
+
+
+def _scarica_grezzo(url: str, host_base: str) -> _Risposta:
+    """GET con redirect gestiti a mano (restando sullo stesso dominio),
+    controllo della destinazione e tetto alla dimensione. Nessuna pausa e
+    nessun controllo di robots.txt: ci pensa _Scaricatore."""
+    for _ in range(MAX_REDIRECT + 1):
+        _controlla_destinazione(url)
+        try:
+            risposta = requests.get(
+                url,
+                headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.5",
+                },
+                timeout=TIMEOUT_SECONDI,
+                allow_redirects=False,
+                stream=True,
+            )
+        except requests.RequestException as errore:
+            raise ErroreAnalisi(f"{url}: {errore.__class__.__name__}") from errore
+        try:
+            destinazione = risposta.headers.get("Location")
+            if risposta.status_code in (301, 302, 303, 307, 308) and destinazione:
+                url = urljoin(url, destinazione)
+                if _host_base(url) != host_base:
+                    raise ErroreAnalisi(f"Redirect verso un altro dominio: {url}")
+                continue
+            tipo = risposta.headers.get("Content-Type", "").lower()
+            if risposta.status_code == 200 and not any(t in tipo for t in ("text/", "xml", "json")):
+                raise ErroreAnalisi(f"{url}: contenuto non testuale ({tipo or 'sconosciuto'})")
+            dati = b""
+            for blocco in risposta.iter_content(65536):
+                dati += blocco
+                if len(dati) > MAX_BYTE:
+                    break
+            return _Risposta(
+                risposta.status_code, url, _decodifica(dati[:MAX_BYTE], risposta.encoding)
+            )
+        finally:
+            risposta.close()
+    raise ErroreAnalisi(f"Troppi redirect: {url}")
+
+
+class _Scaricatore:
+    """Aggiunge a _scarica_grezzo il rispetto di robots.txt e la pausa."""
+
+    def __init__(self, url_iniziale: str):
+        parti = urlsplit(url_iniziale)
+        self.origine = f"{parti.scheme}://{parti.netloc}"
+        self.host = _host_base(url_iniziale)
+        self.sitemap_dichiarate: list[str] = []
+        self._robots = RobotFileParser()
+        self._pausa = PAUSA_SECONDI
+        self._ultima = 0.0
+
+    def carica_robots(self) -> None:
+        risposta = _scarica_grezzo(f"{self.origine}/robots.txt", self.host)
+        if risposta.status >= 500:
+            raise ErroreAnalisi(
+                f"robots.txt non leggibile (HTTP {risposta.status}): "
+                "per prudenza non analizzo il sito."
+            )
+        # 4xx: nessun robots.txt, quindi nessuna restrizione.
+        self._robots.parse(risposta.testo.splitlines() if risposta.status == 200 else [])
+        self.sitemap_dichiarate = self._robots.site_maps() or []
+        ritardo = self._robots.crawl_delay(USER_AGENT_TOKEN)
+        if ritardo:
+            self._pausa = max(self._pausa, min(float(ritardo), PAUSA_MASSIMA_SECONDI))
+
+    def get(self, url: str) -> _Risposta:
+        if not self._robots.can_fetch(USER_AGENT_TOKEN, url):
+            raise ErroreAnalisi(f"{url}: vietato da robots.txt")
+        attesa = self._pausa - (time.monotonic() - self._ultima)
+        if attesa > 0:
+            time.sleep(attesa)
+        try:
+            return _scarica_grezzo(url, self.host)
+        finally:
+            self._ultima = time.monotonic()
+
+
+# --- estrazione dei campi SEO da una pagina ---------------------------------
+
+
+class _Estrattore(HTMLParser):
+    _IGNORATI = frozenset(
+        {"script", "style", "noscript", "template", "nav", "footer", "header", "aside"}
+    )
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.titolo = ""
+        self.meta: dict[str, str] = {}
+        self.canonical = ""
+        self.lingua = ""
+        self.h1: list[str] = []
+        self.h2: list[str] = []
+        self.n_h3 = 0
+        self.json_ld: list[str] = []
+        self.link: list[str] = []
+        self.immagini = 0
+        self.immagini_senza_alt = 0
+        self.parole = 0
+        self._in_titolo = False
+        self._titolo_aperto: str | None = None
+        self._buffer_titolo: list[str] = []
+        self._buffer_titolo_h: list[str] = []
+        self._json_ld_aperto = False
+        self._buffer_json: list[str] = []
+        self._profondita_ignorata = 0
+        self._in_head = False
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v or "") for k, v in attrs}
+        if tag == "html":
+            self.lingua = a.get("lang", "")
+        elif tag == "title":
+            self._in_titolo = True
+        elif tag == "meta":
+            chiave = (a.get("name") or a.get("property") or "").lower()
+            if chiave and chiave not in self.meta:
+                self.meta[chiave] = a.get("content", "").strip()
+        elif tag == "link" and a.get("rel", "").lower() == "canonical":
+            self.canonical = a.get("href", "").strip()
+        elif tag == "a" and a.get("href"):
+            self.link.append(a["href"].strip())
+        elif tag == "img":
+            self.immagini += 1
+            if not a.get("alt", "").strip():
+                self.immagini_senza_alt += 1
+        elif tag in ("h1", "h2"):
+            self._titolo_aperto = tag
+            self._buffer_titolo_h = []
+        elif tag == "h3":
+            self.n_h3 += 1
+        elif tag == "head":
+            self._in_head = True
+        if tag == "script" and "ld+json" in a.get("type", "").lower():
+            self._json_ld_aperto = True
+            self._buffer_json = []
+        if tag in self._IGNORATI:
+            self._profondita_ignorata += 1
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_titolo = False
+            if not self.titolo:
+                self.titolo = " ".join("".join(self._buffer_titolo).split())
+        elif tag in ("h1", "h2") and self._titolo_aperto == tag:
+            testo = " ".join("".join(self._buffer_titolo_h).split())
+            if testo:
+                (self.h1 if tag == "h1" else self.h2).append(testo)
+            self._titolo_aperto = None
+        elif tag == "head":
+            self._in_head = False
+        elif tag == "script" and self._json_ld_aperto:
+            self._json_ld_aperto = False
+            self.json_ld.append("".join(self._buffer_json))
+        if tag in self._IGNORATI:
+            self._profondita_ignorata = max(0, self._profondita_ignorata - 1)
+
+    def handle_data(self, dati):
+        if self._in_titolo:
+            self._buffer_titolo.append(dati)
+        if self._json_ld_aperto:
+            self._buffer_json.append(dati)
+        if self._titolo_aperto:
+            self._buffer_titolo_h.append(dati)
+        if not self._in_head and not self._profondita_ignorata:
+            self.parole += len(dati.split())
+
+
+def _tipi_schema(blocchi_json: list[str]) -> list[str]:
+    tipi: set[str] = set()
+
+    def visita(nodo):
+        if isinstance(nodo, list):
+            for elemento in nodo:
+                visita(elemento)
+        elif isinstance(nodo, dict):
+            valore = nodo.get("@type")
+            if isinstance(valore, str):
+                tipi.add(valore)
+            elif isinstance(valore, list):
+                tipi.update(v for v in valore if isinstance(v, str))
+            for figlio in nodo.values():
+                if isinstance(figlio, (dict, list)):
+                    visita(figlio)
+
+    for blocco in blocchi_json:
+        try:
+            visita(json.loads(blocco))
+        except ValueError:
+            continue  # JSON-LD malformato: capita, non e' un errore dell'analisi
+    return sorted(tipi)
+
+
+def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, list[str]]:
+    """Campi SEO di una pagina e URL dei suoi link interni (assoluti, senza
+    ancore). Del testo tiene solo il conteggio parole."""
+    estrattore = _Estrattore()
+    estrattore.feed(testo)
+    estrattore.close()
+
+    interni: list[str] = []
+    n_esterni = 0
+    visti: set[str] = set()
+    for href in estrattore.link:
+        if href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        assoluto = urljoin(url, href).split("#")[0]
+        if urlsplit(assoluto).scheme not in ("http", "https"):
+            continue
+        if _host_base(assoluto) == host:
+            if assoluto not in visti:
+                visti.add(assoluto)
+                interni.append(assoluto)
+        else:
+            n_esterni += 1
+
+    meta_description = estrattore.meta.get("description", "")
+    pagina = {
+        "url": url,
+        "tipo": tipo,
+        "titolo": estrattore.titolo,
+        "lunghezza_titolo": len(estrattore.titolo),
+        "meta_description": meta_description,
+        "lunghezza_meta": len(meta_description),
+        "h1": estrattore.h1[:3],
+        "h2": estrattore.h2[:8],
+        "n_h3": estrattore.n_h3,
+        "dati_strutturati": _tipi_schema(estrattore.json_ld),
+        "canonical": estrattore.canonical,
+        "meta_robots": estrattore.meta.get("robots", ""),
+        "open_graph": "og:title" in estrattore.meta,
+        "lingua": estrattore.lingua,
+        "n_parole": estrattore.parole,
+        "immagini": estrattore.immagini,
+        "immagini_senza_alt": estrattore.immagini_senza_alt,
+        "link_interni": len(interni),
+        "link_esterni": n_esterni,
+    }
+    return pagina, interni
+
+
+# --- sitemap e scelta del campione ------------------------------------------
+
+
+def _estrai_loc(testo: str) -> list[str]:
+    return [html.unescape(u).strip() for u in re.findall(r"<loc>\s*(.*?)\s*</loc>", testo, re.S)]
+
+
+def _tipo_da_percorso(url: str) -> str | None:
+    percorso = urlsplit(url).path.lower()
+    if any(f in percorso for f in _FRAGMENT_PRODOTTO):
+        return "prodotto"
+    if any(f in percorso for f in _FRAGMENT_CATEGORIA + _FRAGMENT_COLLEZIONE):
+        return "categoria"
+    return None
+
+
+def _tipo_da_nome_sitemap(url: str) -> str | None:
+    nome = urlsplit(url).path.lower()
+    if any(k in nome for k in ("product_cat", "product-cat", "categor", "collection")):
+        return "categoria"
+    if ("product" in nome or "prodott" in nome) and "tag" not in nome:
+        return "prodotto"
+    return None
+
+
+def _campiona(urls: list[str], quanti: int) -> list[str]:
+    """Scelta deterministica e distribuita su tutta la lista (non solo i primi
+    elementi, che in una sitemap sono di solito i piu' vecchi)."""
+    if quanti <= 0:
+        return []
+    if len(urls) <= quanti:
+        return list(urls)
+    if quanti == 1:
+        return [urls[0]]
+    passo = (len(urls) - 1) / (quanti - 1)
+    return [urls[round(i * passo)] for i in range(quanti)]
+
+
+def _scarica_sitemap(scaricatore: _Scaricatore, url: str) -> str | None:
+    if url.endswith(".gz") or _host_base(url) != scaricatore.host:
+        return None
+    try:
+        risposta = scaricatore.get(url)
+    except ErroreAnalisi:
+        return None
+    if risposta.status == 200 and "<loc>" in risposta.testo:
+        return risposta.testo
+    return None
+
+
+def _urls_dalla_sitemap(scaricatore: _Scaricatore) -> tuple[dict[str, list[str]], str | None]:
+    """URL di categorie e prodotti trovati nella sitemap (indice o piatta) e
+    indirizzo della sitemap usata (None se non se ne trova nessuna)."""
+    trovati: dict[str, list[str]] = {"categoria": [], "prodotto": []}
+    candidate = list(
+        dict.fromkeys(
+            scaricatore.sitemap_dichiarate
+            + [
+                f"{scaricatore.origine}{p}"
+                for p in ("/sitemap.xml", "/wp-sitemap.xml", "/sitemap_index.xml")
+            ]
+        )
+    )
+    for indirizzo in candidate:
+        testo = _scarica_sitemap(scaricatore, indirizzo)
+        if testo is None:
+            continue
+        if "<sitemapindex" in testo:
+            figlie: dict[str, list[str]] = {"categoria": [], "prodotto": []}
+            for figlia in _estrai_loc(testo):
+                tipo = _tipo_da_nome_sitemap(figlia)
+                if tipo:
+                    figlie[tipo].append(figlia)
+            for tipo, elenco in figlie.items():
+                for figlia in elenco[:MAX_SITEMAP_FIGLIE]:
+                    contenuto = _scarica_sitemap(scaricatore, figlia)
+                    if contenuto:
+                        trovati[tipo].extend(_estrai_loc(contenuto))
+        else:
+            for url in _estrai_loc(testo):
+                tipo = _tipo_da_percorso(url)
+                if tipo:
+                    trovati[tipo].append(url)
+        return trovati, indirizzo
+    return trovati, None
+
+
+# --- aggregazione -----------------------------------------------------------
+
+
+def _percentuale(parte: int, totale: int) -> int:
+    return round(100 * parte / totale) if totale else 0
+
+
+def _media(valori: list[int | float]) -> int:
+    return round(sum(valori) / len(valori)) if valori else 0
+
+
+def _normalizza_testo(testo: str) -> str:
+    return " ".join(testo.lower().split())
+
+
+def _schema_titolo(titoli: list[str]) -> dict:
+    """Separatore piu' usato e segmento finale ricorrente (di solito il brand)."""
+    titoli = [t for t in titoli if t]
+    separatori = Counter(s.strip() for t in titoli for s in _SEPARATORI_TITOLO if s in t)
+    suffissi: Counter = Counter()
+    for titolo in titoli:
+        for separatore in _SEPARATORI_TITOLO:
+            if separatore in titolo:
+                suffissi[_normalizza_testo(titolo.rsplit(separatore, 1)[1])] += 1
+                break
+    suffisso, volte = suffissi.most_common(1)[0] if suffissi else ("", 0)
+    return {
+        "lunghezza_media": _media([len(t) for t in titoli]),
+        "percentuale_tra_30_e_60_caratteri": _percentuale(
+            sum(30 <= len(t) <= 60 for t in titoli), len(titoli)
+        ),
+        "separatore_piu_comune": separatori.most_common(1)[0][0] if separatori else "",
+        "suffisso_ricorrente": suffisso if volte >= max(2, len(titoli) // 2) else "",
+    }
+
+
+def _riepilogo_tipo(pagine: list[dict]) -> dict:
+    n = len(pagine)
+    h2: Counter = Counter()
+    schema: Counter = Counter()
+    for pagina in pagine:
+        h2.update({_normalizza_testo(t) for t in pagina["h2"]})
+        schema.update(pagina["dati_strutturati"])
+    totale_immagini = sum(p["immagini"] for p in pagine)
+    return {
+        "pagine_analizzate": n,
+        "titolo": _schema_titolo([p["titolo"] for p in pagine]),
+        "meta_description": {
+            "presente_percentuale": _percentuale(
+                sum(bool(p["meta_description"]) for p in pagine), n
+            ),
+            "lunghezza_media": _media(
+                [p["lunghezza_meta"] for p in pagine if p["meta_description"]]
+            ),
+        },
+        "con_un_solo_h1_percentuale": _percentuale(sum(len(p["h1"]) == 1 for p in pagine), n),
+        "h2_ricorrenti": [{"testo": t, "pagine": c} for t, c in h2.most_common(8) if c >= 2],
+        "dati_strutturati": dict(schema.most_common()),
+        "parole_medie": _media([p["n_parole"] for p in pagine]),
+        "immagini_senza_alt_percentuale": _percentuale(
+            sum(p["immagini_senza_alt"] for p in pagine), totale_immagini
+        ),
+        "link_interni_medi": _media([p["link_interni"] for p in pagine]),
+    }
+
+
+def _parole_ricorrenti(pagine: list[dict]) -> list[dict]:
+    """Termini di titolo, H1 e H2 presenti in almeno 2 pagine (contati una
+    volta per pagina)."""
+    per_pagina: Counter = Counter()
+    for pagina in pagine:
+        testo = " ".join([pagina["titolo"], *pagina["h1"], *pagina["h2"]]).lower()
+        termini = {t for t in re.findall(r"[a-zàèéìòù0-9]{4,}", testo) if t not in _PAROLE_VUOTE}
+        per_pagina.update(termini)
+    return [{"termine": t, "pagine": c} for t, c in per_pagina.most_common(15) if c >= 2]
+
+
+def _costruisci_report(
+    sito: str,
+    pagine: list[dict],
+    saltate: list[dict],
+    sitemap: str | None,
+    urls_in_sitemap: dict[str, int],
+    avvisi: list[str],
+) -> dict:
+    per_tipo = {
+        tipo: _riepilogo_tipo([p for p in pagine if p["tipo"] == tipo])
+        for tipo in ("categoria", "prodotto")
+        if any(p["tipo"] == tipo for p in pagine)
+    }
+    return {
+        "sito": sito,
+        "data": date.today().isoformat(),
+        "campione": {
+            "pagine_analizzate": len(pagine),
+            "categorie": sum(p["tipo"] == "categoria" for p in pagine),
+            "prodotti": sum(p["tipo"] == "prodotto" for p in pagine),
+            "pagine_saltate": saltate,
+        },
+        "sitemap": {"indirizzo": sitemap, "url_trovati": urls_in_sitemap},
+        "avvisi": avvisi,
+        "riepilogo_per_tipo": per_tipo,
+        "parole_ricorrenti": _parole_ricorrenti(pagine),
+        "pagine": pagine,
+        "nota_uso": (
+            "Spunti sugli schemi del sito analizzato (struttura, lunghezze, temi, dati "
+            "strutturati), non testi da riutilizzare: non copiare titoli, description o "
+            "descrizioni, e scrivi solo cose vere sui nostri prodotti."
+        ),
+    }
+
+
+def _avviso_pagine_identiche(pagine: list[dict]) -> str | None:
+    """Segnala quando la maggior parte delle pagine di categoria/prodotto ha lo
+    stesso H1 e la stessa lunghezza: di solito e' una pagina segnaposto
+    ("negozio in arrivo", manutenzione) o una sfida anti-bot servita al posto
+    del contenuto, e i numeri del report non descrivono le pagine vere."""
+    gruppi = Counter(
+        (tuple(p["h1"]), p["n_parole"]) for p in pagine if p["tipo"] != "home" and p["h1"]
+    )
+    totale = sum(p["tipo"] != "home" for p in pagine)
+    if not gruppi:
+        return None
+    (h1, _), uguali = gruppi.most_common(1)[0]
+    if uguali < 3 or uguali < 0.6 * totale:
+        return None
+    return (
+        f"{uguali} pagine su {totale} hanno lo stesso H1 ('{h1[0]}') e la stessa lunghezza: "
+        "probabilmente il sito serve una pagina segnaposto (negozio 'in arrivo', "
+        "manutenzione, controllo anti-bot) invece del contenuto vero. Titoli e meta "
+        "description restano validi, ma struttura, parole e immagini no."
+    )
+
+
+# --- entry point ------------------------------------------------------------
+
+
+def _analizza(url: str, max_categorie: int, max_prodotti: int) -> dict:
+    url = _normalizza_url(url)
+    scaricatore = _Scaricatore(url)
+    scaricatore.carica_robots()
+
+    risposta_home = scaricatore.get(url)
+    if risposta_home.status != 200:
+        raise ErroreAnalisi(f"Pagina iniziale: HTTP {risposta_home.status}")
+    home, link_home = _estrai_pagina(
+        risposta_home.testo, risposta_home.url, "home", scaricatore.host
+    )
+    pagine = [home]
+    avvisi: list[str] = []
+    if not home["h1"] and home["n_parole"] < 50:
+        avvisi.append(
+            "La home ha quasi nessun testo e nessun H1 nell'HTML scaricato: il sito "
+            "probabilmente costruisce le pagine con JavaScript, e questa analisi (che non "
+            "esegue JavaScript) vede solo una parte di quello che vede Google."
+        )
+
+    trovati, sitemap = _urls_dalla_sitemap(scaricatore)
+    if sitemap is None:
+        avvisi.append(
+            "Nessuna sitemap trovata: le pagine di esempio sono scelte dai link della home."
+        )
+    # I link della home integrano la sitemap solo dove questa non ha dato nulla.
+    da_home: dict[str, list[str]] = {"categoria": [], "prodotto": []}
+    for link in link_home:
+        tipo = _tipo_da_percorso(link)
+        if tipo:
+            da_home[tipo].append(link)
+    for tipo in da_home:
+        trovati[tipo] = trovati[tipo] or da_home[tipo]
+    urls_in_sitemap = {"categorie": len(trovati["categoria"]), "prodotti": len(trovati["prodotto"])}
+
+    campione = [
+        *((u, "categoria") for u in _campiona(trovati["categoria"], max_categorie)),
+        *((u, "prodotto") for u in _campiona(trovati["prodotto"], max_prodotti)),
+    ]
+    saltate: list[dict] = []
+    for indirizzo, tipo in campione:
+        if indirizzo.rstrip("/") == risposta_home.url.rstrip("/"):
+            continue
+        try:
+            risposta = scaricatore.get(indirizzo)
+        except ErroreAnalisi as errore:
+            saltate.append({"url": indirizzo, "motivo": str(errore)})
+            continue
+        if risposta.status != 200:
+            saltate.append({"url": indirizzo, "motivo": f"HTTP {risposta.status}"})
+            continue
+        pagina, _ = _estrai_pagina(risposta.testo, risposta.url, tipo, scaricatore.host)
+        pagine.append(pagina)
+
+    avviso_identiche = _avviso_pagine_identiche(pagine)
+    if avviso_identiche:
+        avvisi.append(avviso_identiche)
+    if len(pagine) == 1 and not saltate:
+        avvisi.append(
+            "Non ho trovato categorie o prodotti da analizzare: il report copre solo la home."
+        )
+    return _costruisci_report(
+        scaricatore.origine, pagine, saltate, sitemap, urls_in_sitemap, avvisi
+    )
+
+
+def analizza_seo_sito(
+    url: str,
+    max_categorie: int = MAX_CATEGORIE_DEFAULT,
+    max_prodotti: int = MAX_PRODOTTI_DEFAULT,
+) -> dict:
+    """Analisi SEO a campione del sito `url`; vedi la docstring del modulo.
+    I limiti sono accettati entro un tetto massimo. In caso di problemi
+    prevedibili (sito non raggiungibile, robots.txt che lo vieta, rete privata)
+    restituisce {"errore": ...} invece di sollevare."""
+    max_categorie = max(0, min(max_categorie, TETTO_CATEGORIE))
+    max_prodotti = max(0, min(max_prodotti, TETTO_PRODOTTI))
+    try:
+        return _analizza(url, max_categorie, max_prodotti)
+    except ErroreAnalisi as errore:
+        return {"errore": str(errore)}
