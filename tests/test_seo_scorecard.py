@@ -405,6 +405,81 @@ def test_meta_con_testo_proprio_vale_il_massimo_e_le_regole_fra_pagine_servono_4
     assert _credito_meta(uguali)[0] == 1.0
 
 
+def test_stessa_frase_su_poche_categorie_vale_mezzo_credito():
+    """Euronics: tre categorie con '<nome> in offerta su Negozio. Approfitta...' fra molti prodotti
+    con meta proprie: la frase non e' su meta' delle pagine, ma e' su tutte le categorie."""
+    pagine = [
+        pagina(
+            "categoria",
+            i,
+            titolo=f"Categoria {i} - offerte su Negozio",
+            meta_description=f"Categoria {i} in offerta su Negozio. Approfitta dei prezzi scontati "
+            "e acquista il tuo prodotto preferito.",
+            h1=[f"Categoria {i}"],
+        )
+        for i in range(3)
+    ]
+    pagine += [_con_meta(f"Prodotto {i} | Negozio", _meta_propria(i), 10 + i) for i in range(8)]
+    valore, evidenza = _credito_meta(pagine)
+    assert "3 titolo piu' frase generica" in evidenza
+    assert valore == pytest.approx((8 + 3 * 0.5) / 11, abs=0.01)
+
+
+def test_la_pagina_iniziale_di_una_sezione_conta_come_categoria():
+    """Back Market: la pagina iniziale e' una 'sezione' e le altre due sono categorie."""
+    tipi = ["sezione", "categoria", "categoria"]
+    pagine = [
+        pagina(
+            tipo,
+            i,
+            titolo=f"Categoria {i} | Negozio",
+            meta_description=f"Trova il tuo articolo {i} su Negozio! Come nuovo, miglior prezzo, "
+            "consegna in 24 ore, garanzia inclusa.",
+            h1=[f"Categoria {i}"],
+        )
+        for i, tipo in enumerate(tipi)
+    ]
+    pagine += [_con_meta(f"Prodotto {i} | Negozio", _meta_propria(i), 10 + i) for i in range(8)]
+    assert "3 titolo piu' frase generica" in _credito_meta(pagine)[1]
+
+
+def test_due_categorie_con_la_stessa_frase_non_bastano():
+    pagine = [
+        pagina(
+            "categoria",
+            i,
+            titolo=f"Categoria {i} - offerte su Negozio",
+            meta_description=f"Categoria {i} in offerta su Negozio. Approfitta dei prezzi scontati "
+            "e acquista il tuo prodotto preferito.",
+            h1=[f"Categoria {i}"],
+        )
+        for i in range(2)
+    ]
+    pagine += [_con_meta(f"Prodotto {i} | Negozio", _meta_propria(i), 10 + i) for i in range(8)]
+    assert _credito_meta(pagine)[0] == 1.0
+
+
+def test_poche_meta_utili_pesano_meno_su_lunghezza_e_unicita():
+    """Tomato: solo 2 meta proprie su 14, e per giunta fra 110 e 160 caratteri e diverse."""
+    fissa = "GARANZIA 12 MESI RESO GRATUITO ENTRO 14GG"
+    pagine = [_con_meta(f"APPLE iPhone {i} | Negozio", fissa, i) for i in range(10)]
+    pagine += [_con_meta(f"Pagina {i} | Negozio", _meta_propria(i), 100 + i) for i in range(2)]
+    area = valuta(pagine, True, True)["aree"]["meta_description"]
+    pesi = {c["criterio"]: c["peso"] for c in area["criteri"]}
+    assert pesi["meta description utile"] == 3
+    assert pesi["lunghezza adatta"] == pytest.approx(0.4)
+    assert pesi["diversa da pagina a pagina"] == pytest.approx(0.4)
+    evidenze = {c["criterio"]: c["evidenza"] for c in area["criteri"]}
+    assert "peso ridotto a 0.4" in evidenze["lunghezza adatta"]
+
+
+def test_con_cinque_meta_utili_il_peso_e_pieno():
+    pagine = [_con_meta(f"Prodotto {i} | Negozio", _meta_propria(i), i) for i in range(5)]
+    area = valuta(pagine, True, True)["aree"]["meta_description"]
+    assert [c["peso"] for c in area["criteri"]] == [3, 1.0, 1.0]
+    assert all("peso ridotto" not in c["evidenza"] for c in area["criteri"])
+
+
 # --- H1: uno, piu' uguali, piu' diversi, nessuno ----------------------------
 
 

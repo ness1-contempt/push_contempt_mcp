@@ -73,6 +73,8 @@ SOMIGLIANZA_FORMULA = (
     0.7  # Jaccard fra le parti aggiunte al titolo, per dire che sono la stessa frase
 )
 PAROLE_NUOVE_MINIME = 3  # una meta che aggiunge meno parole al titolo e' "solo il titolo"
+PAGINE_FORMULA_STESSO_TIPO = 3  # stessa frase generica su tante pagine dello stesso tipo
+META_UTILI_PESO_PIENO = 5  # con meno meta utili, lunghezza e unicita' pesano meno
 # H1: valore di una pagina in base a quanti ne ha.
 VALORE_H1_UNO = 1.0
 VALORE_H1_UGUALI = 0.6  # piu' H1 con lo stesso testo
@@ -183,6 +185,24 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b) if a | b else 0.0
 
 
+def _tipo_per_confronto(pagina: dict) -> str:
+    """La pagina iniziale di una sezione e' una categoria a tutti gli effetti."""
+    return "categoria" if pagina["tipo"] == "sezione" else pagina["tipo"]
+
+
+def _e_frase_generica(i: int, pagina: dict, con_meta: list, aggiunte: dict) -> bool:
+    """La meta aggiunge al titolo la stessa frase di molte altre pagine: della meta' delle
+    pagine con meta, oppure di almeno PAGINE_FORMULA_STESSO_TIPO pagine dello stesso tipo
+    (le categorie di Euronics e Back Market sono poche, ma tutte con la stessa formula)."""
+    simili = [
+        p
+        for j, p in con_meta
+        if j != i and _jaccard(aggiunte[i], aggiunte[j]) >= SOMIGLIANZA_FORMULA
+    ]
+    stesso_tipo = sum(_tipo_per_confronto(p) == _tipo_per_confronto(pagina) for p in simili)
+    return len(simili) > (len(con_meta) - 1) / 2 or stesso_tipo >= PAGINE_FORMULA_STESSO_TIPO - 1
+
+
 def _classifica_meta(pagine: list[dict]) -> dict[int, tuple[str, float]]:
     """Per ogni pagina con meta description (chiave: posizione nella lista) il tipo e il
     credito. Tipi, dal peggiore: scheda incollata (0), frase fissa uguale su piu' della
@@ -204,14 +224,7 @@ def _classifica_meta(pagine: list[dict]) -> dict[int, tuple[str, float]]:
             risultato[i] = ("frase fissa", 0.0)
         elif len(aggiunte[i]) < PAROLE_NUOVE_MINIME:
             risultato[i] = ("solo il titolo", 0.0)
-        elif n >= MIN_PAGINE_CONFRONTO and (
-            sum(
-                _jaccard(aggiunte[i], aggiunte[j]) >= SOMIGLIANZA_FORMULA
-                for j, _ in con_meta
-                if j != i
-            )
-            > (n - 1) / 2
-        ):
+        elif n >= MIN_PAGINE_CONFRONTO and _e_frase_generica(i, p, con_meta, aggiunte):
             risultato[i] = ("titolo piu' frase generica", CREDITO_META_FORMULA)
         else:
             risultato[i] = ("testo proprio", CREDITO_META_PROPRIA)
@@ -248,16 +261,20 @@ def _meta(pagine: list[dict]) -> list[dict]:
     if utili:
         nel_range = sum(META_MIN <= len(p["meta_description"]) <= META_MAX for p in utili)
         distinte = len({p["meta_description"] for p in utili})
+        peso = min(1.0, len(utili) / META_UTILI_PESO_PIENO)
+        nota = "" if peso == 1.0 else f" (peso ridotto a {peso:.1f}: poche meta da misurare)"
         criteri += [
             _criterio(
                 "lunghezza adatta",
                 _quota(nel_range, len(utili)),
-                f"meta fra {META_MIN} e {META_MAX} caratteri: {nel_range} su {len(utili)}",
+                f"meta fra {META_MIN} e {META_MAX} caratteri: {nel_range} su {len(utili)}{nota}",
+                peso=peso,
             ),
             _criterio(
                 "diversa da pagina a pagina",
                 _quota(distinte, len(utili)),
-                f"meta description distinte: {distinte} su {len(utili)}",
+                f"meta description distinte: {distinte} su {len(utili)}{nota}",
+                peso=peso,
             ),
         ]
     return criteri
