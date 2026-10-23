@@ -15,9 +15,10 @@ aree usare il sito come ispirazione.
 
 Oltre alla media dei criteri ci sono i "tetti": regole esplicite che limitano il voto
 di un'area quando c'e' un difetto grave, qualunque sia la media (immagini senza ALT
-oltre il 35% -> contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su piu' della meta' delle pagine ->
-intestazioni al massimo 6). Il report mostra sempre ogni tetto con la sua misura, anche
-quando non scatta, e l'effetto che ha avuto. Le soglie sono costanti in testa al modulo.
+oltre il 35% -> contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su piu'
+della meta' delle pagine -> intestazioni al massimo 6). Il report mostra sempre ogni
+tetto con la sua misura, anche quando non scatta, e l'effetto che ha avuto. Le soglie sono
+costanti in testa al modulo.
 
 Cosa NON misura: posizionamento, autorevolezza, velocita', qualita' dei testi
 (solo struttura e quantita'). Funzioni pure: nessuna rete.
