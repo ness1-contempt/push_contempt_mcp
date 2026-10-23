@@ -53,6 +53,7 @@ TIMEOUT_SECONDI = 10
 MAX_BYTE = 1_500_000
 MAX_REDIRECT = 3
 MAX_SITEMAP_FIGLIE = 2
+RETRY_AFTER_MASSIMO_SECONDI = 120
 
 MAX_CATEGORIE_DEFAULT = 3
 MAX_PRODOTTI_DEFAULT = 10
@@ -72,10 +73,11 @@ class ErroreAnalisi(Exception):
 
 
 class _Risposta:
-    def __init__(self, status: int, url: str, testo: str):
+    def __init__(self, status: int, url: str, testo: str, retry_after: float | None = None):
         self.status = status
         self.url = url
         self.testo = testo
+        self.retry_after = retry_after  # secondi, dall'intestazione Retry-After
 
 
 # --- rete -------------------------------------------------------------------
@@ -158,8 +160,12 @@ def _scarica_grezzo(url: str, host_base: str) -> _Risposta:
                 dati += blocco
                 if len(dati) > MAX_BYTE:
                     break
+            attesa = risposta.headers.get("Retry-After", "").strip()
             return _Risposta(
-                risposta.status_code, url, _decodifica(dati[:MAX_BYTE], risposta.encoding)
+                risposta.status_code,
+                url,
+                _decodifica(dati[:MAX_BYTE], risposta.encoding),
+                float(attesa) if attesa.isdigit() else None,
             )
         finally:
             risposta.close()
@@ -199,7 +205,17 @@ class _Scaricatore:
         if attesa > 0:
             time.sleep(attesa)
         try:
-            return _scarica_grezzo(url, self.host)
+            risposta = _scarica_grezzo(url, self.host)
+            # Se il sito chiede di rallentare si aspetta quanto indicato e si
+            # ritenta una volta sola; se insiste, non si prosegue (vedi _analizza).
+            if (
+                risposta.status in (429, 503)
+                and risposta.retry_after is not None
+                and risposta.retry_after <= RETRY_AFTER_MASSIMO_SECONDI
+            ):
+                time.sleep(risposta.retry_after)
+                risposta = _scarica_grezzo(url, self.host)
+            return risposta
         finally:
             self._ultima = time.monotonic()
 
@@ -727,6 +743,15 @@ def _avviso_pagine_identiche(pagine: list[dict]) -> str | None:
 # --- entry point ------------------------------------------------------------
 
 
+def _motivo_http(status: int) -> str:
+    if status == 429:
+        return (
+            "HTTP 429: il sito limita le richieste automatiche. Non aggiro il blocco "
+            "(riprova piu' tardi, o dai al sito un'altra via, vedi i suoi termini)"
+        )
+    return f"HTTP {status}"
+
+
 def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: int) -> dict:
     url = _normalizza_url(url)
     scaricatore = _Scaricatore(url)
@@ -734,7 +759,7 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: in
 
     risposta_home = scaricatore.get(url)
     if risposta_home.status != 200:
-        raise ErroreAnalisi(f"Pagina iniziale: HTTP {risposta_home.status}")
+        raise ErroreAnalisi(f"Pagina iniziale: {_motivo_http(risposta_home.status)}")
     home, link_home = _estrai_pagina(
         risposta_home.testo, risposta_home.url, "home", scaricatore.host
     )
@@ -776,7 +801,13 @@ def _analizza(url: str, max_categorie: int, max_prodotti: int, max_caratteri: in
             saltate.append({"url": indirizzo, "motivo": str(errore)})
             continue
         if risposta.status != 200:
-            saltate.append({"url": indirizzo, "motivo": f"HTTP {risposta.status}"})
+            saltate.append({"url": indirizzo, "motivo": _motivo_http(risposta.status)})
+            if risposta.status == 429:
+                avvisi.append(
+                    "Il sito ha continuato a limitare le richieste (HTTP 429) anche dopo l'attesa "
+                    "richiesta: mi sono fermato, il report copre solo le pagine gia' scaricate."
+                )
+                break
             continue
         pagina, _ = _estrai_pagina(risposta.testo, risposta.url, tipo, scaricatore.host)
         pagine.append(pagina)

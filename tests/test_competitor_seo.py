@@ -601,3 +601,70 @@ def test_analizza_seo_sito_non_segnala_segnaposto_su_pagine_normali(monkeypatch)
     _sito_finto(monkeypatch, _negozio_finto())
     report = analizza_seo_sito("https://esempio.it")
     assert not any("segnaposto" in a for a in report["avvisi"])
+
+
+def _sito_con_limiti(monkeypatch, risposte: dict[str, list[_Risposta]]):
+    """Come _sito_finto, ma ogni URL ha una lista di risposte da servire in ordine."""
+    richieste: list[str] = []
+
+    def finto(url, host_base):
+        richieste.append(url)
+        coda = risposte.get(url)
+        if not coda:
+            return _Risposta(404, url, "")
+        return coda.pop(0) if len(coda) > 1 else coda[0]
+
+    monkeypatch.setattr(competitor_seo, "_scarica_grezzo", finto)
+    pause: list[float] = []
+    monkeypatch.setattr(competitor_seo.time, "sleep", pause.append)
+    return richieste, pause
+
+
+def test_429_con_retry_after_aspetta_e_ritenta_una_volta(monkeypatch):
+    pagina_ok = _Risposta(200, "https://esempio.it/", _pagina_html("Home", "Home"))
+    richieste, pause = _sito_con_limiti(
+        monkeypatch,
+        {
+            "https://esempio.it/": [_Risposta(429, "https://esempio.it/", "", 60.0), pagina_ok],
+        },
+    )
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert "errore" not in report
+    assert richieste.count("https://esempio.it/") == 2
+    assert 60.0 in pause
+
+
+def test_429_che_continua_sulla_home_da_un_errore_chiaro_senza_insistere(monkeypatch):
+    limitata = _Risposta(429, "https://esempio.it/", "", 60.0)
+    richieste, pause = _sito_con_limiti(monkeypatch, {"https://esempio.it/": [limitata]})
+
+    errore = analizza_seo_sito("https://esempio.it")["errore"]
+
+    assert "429" in errore and "Non aggiro" in errore
+    assert richieste.count("https://esempio.it/") == 2  # una richiesta + un solo nuovo tentativo
+    assert pause == [60.0]
+
+
+def test_429_senza_retry_after_o_troppo_lungo_non_viene_ritentato(monkeypatch):
+    for attesa in (None, 3600.0):
+        limitata = _Risposta(429, "https://esempio.it/", "", attesa)
+        richieste, pause = _sito_con_limiti(monkeypatch, {"https://esempio.it/": [limitata]})
+        assert "429" in analizza_seo_sito("https://esempio.it")["errore"]
+        assert richieste.count("https://esempio.it/") == 1
+        assert pause == []
+
+
+def test_429_a_meta_analisi_ferma_il_campione_e_restituisce_il_parziale(monkeypatch):
+    sito = {url: [_Risposta(stato, url, testo)] for url, (stato, testo) in _negozio_finto().items()}
+    cat = "https://esempio.it/categoria-prodotto/cat-3/"  # la seconda categoria del campione
+    sito[cat] = [_Risposta(429, cat, "", None)]
+    richieste, _ = _sito_con_limiti(monkeypatch, sito)
+
+    report = analizza_seo_sito("https://esempio.it")
+
+    assert any("mi sono fermato" in a for a in report["avvisi"])
+    assert report["campione"]["prodotti"] == 0  # non ha proseguito oltre il 429
+    assert report["campione"]["pagine_saltate"][-1]["url"] == cat
+    assert not any("/prodotto/" in r for r in richieste)
