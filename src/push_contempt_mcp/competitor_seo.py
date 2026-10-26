@@ -413,6 +413,23 @@ class _Scaricatore:
 # --- estrazione dei campi SEO da una pagina ---------------------------------
 
 
+# Testo che non e' contenuto ma debug o errori di programmazione lasciati nella pagina
+# (nomi di metodo come getAggregateRating, "undefined", errori PHP, tracce di errore):
+# non conta come parole, vocabolario ne' estratto.
+_RE_TESTO_DI_DEBUG = re.compile(
+    r"\b(?:get|set)[A-Z][a-z]+[A-Z]\w*"
+    r"|\bbvseo\w*"
+    r"|\[object Object\]|\bundefined\b|\bNaN\b"
+    r"|\{\{.{0,80}?\}\}|<\?php|\bTraceback \(most recent"
+    r"|\b(?:Fatal error|Parse error|Warning|Notice|Deprecated):.{0,200}?\bon line \d+"
+    r"|\bStack trace:|\b(?:TypeError|ReferenceError|SyntaxError|NullPointerException)\b"
+)
+# Contenitori di metadati invisibili di servizi esterni (Bazaarvoice lascia un elenco di
+# righe di debug nascosto in ogni scheda): l'intero contenitore e' fuori dal contenuto.
+_RE_CONTENITORE_DEBUG = re.compile(r"bvseo", re.IGNORECASE)
+_TAG_VUOTI = frozenset("area base br col embed hr img input link meta source track wbr".split())
+
+
 class _Estrattore(HTMLParser):
     _IGNORATI = frozenset(
         {"script", "style", "noscript", "template", "nav", "footer", "header", "aside"}
@@ -438,6 +455,7 @@ class _Estrattore(HTMLParser):
         self.n_h3 = 0
         self.json_ld: list[str] = []
         self.link: list[str] = []
+        self.link_contenuto: list[str] = []  # i link fuori da menu, intestazione e piede
         self.immagini = 0
         self.immagini_senza_alt = 0
         self.parole = 0
@@ -455,12 +473,17 @@ class _Estrattore(HTMLParser):
         self._buffer_json: list[str] = []
         self._buffer_blocco: list[str] = []
         self._profondita_ignorata = 0
+        self._contenitore_debug: str | None = None  # tag del contenitore di debug aperto
+        self._profondita_debug = 0
         self._in_head = False
         self._h1_visto = False
 
     def _chiudi_blocco(self):
         testo = " ".join("".join(self._buffer_blocco).split())
         self._buffer_blocco = []
+        if testo and _RE_TESTO_DI_DEBUG.search(testo):
+            self.parole -= len(testo.split())  # handle_data lo aveva gia' contato
+            return
         if not testo or len(self.blocchi) >= self._MAX_BLOCCHI:
             return
         testo = testo[: self._MAX_CARATTERI_BLOCCO]
@@ -469,12 +492,24 @@ class _Estrattore(HTMLParser):
             self.blocchi_dopo_h1.append(testo)
 
     def _nel_contenuto(self) -> bool:
-        return not self._in_head and not self._profondita_ignorata
+        return (
+            not self._in_head
+            and not self._profondita_ignorata
+            and self._contenitore_debug is None
+        )
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
         if tag in self._BLOCCHI or tag in self._IGNORATI:
             self._chiudi_blocco()
+        if self._contenitore_debug is not None:
+            if tag == self._contenitore_debug:
+                self._profondita_debug += 1
+        elif tag not in _TAG_VUOTI and _RE_CONTENITORE_DEBUG.search(
+            f"{a.get('id', '')} {a.get('class', '')}"
+        ):
+            self._contenitore_debug = tag
+            self._profondita_debug = 1
         if self._nel_contenuto():
             if tag == "p":
                 self.paragrafi += 1
@@ -498,6 +533,8 @@ class _Estrattore(HTMLParser):
             self.canonical = a.get("href", "").strip()
         elif tag == "a" and a.get("href"):
             self.link.append(a["href"].strip())
+            if self._nel_contenuto():
+                self.link_contenuto.append(a["href"].strip())
         elif tag == "img":
             self.immagini += 1
             if not a.get("alt", "").strip():
@@ -519,6 +556,10 @@ class _Estrattore(HTMLParser):
     def handle_endtag(self, tag):
         if tag in self._BLOCCHI or tag in self._IGNORATI:
             self._chiudi_blocco()
+        if self._contenitore_debug is not None and tag == self._contenitore_debug:
+            self._profondita_debug -= 1
+            if self._profondita_debug <= 0:
+                self._contenitore_debug = None
         if tag == "title":
             self._in_titolo = False
             if not self.titolo:
@@ -626,6 +667,24 @@ def _dati_prodotto(blocchi_json: list[str]) -> dict:
     return {}
 
 
+def _assoluto(href: str, url: str) -> str | None:
+    if href.startswith(("#", "mailto:", "tel:", "javascript:")):
+        return None
+    assoluto = urljoin(url, href).split("#")[0]
+    return assoluto if urlsplit(assoluto).scheme in ("http", "https") else None
+
+
+def _link_interni(hrefs: list[str], url: str, host: str) -> list[str]:
+    """Indirizzi assoluti dei link verso lo stesso sito, senza ripetizioni."""
+    trovati = (_assoluto(h, url) for h in hrefs)
+    return list(dict.fromkeys(a for a in trovati if a and _host_base(a) == host))
+
+
+def _conta_link_esterni(hrefs: list[str], url: str, host: str) -> int:
+    trovati = (_assoluto(h, url) for h in hrefs)
+    return sum(1 for a in trovati if a and _host_base(a) != host)
+
+
 def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, list[str]]:
     """Campi SEO e testo di una pagina e URL dei suoi link interni (assoluti,
     senza ancore). Il testo resta nel campo interno `_blocchi` (i blocchi di
@@ -634,21 +693,8 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
     estrattore.feed(testo)
     estrattore.close()
 
-    interni: list[str] = []
-    n_esterni = 0
-    visti: set[str] = set()
-    for href in estrattore.link:
-        if href.startswith(("#", "mailto:", "tel:", "javascript:")):
-            continue
-        assoluto = urljoin(url, href).split("#")[0]
-        if urlsplit(assoluto).scheme not in ("http", "https"):
-            continue
-        if _host_base(assoluto) == host:
-            if assoluto not in visti:
-                visti.add(assoluto)
-                interni.append(assoluto)
-        else:
-            n_esterni += 1
+    interni = _link_interni(estrattore.link, url, host)
+    n_esterni = _conta_link_esterni(estrattore.link, url, host)
 
     meta_description = estrattore.meta.get("description", "")
     pagina = {
@@ -679,6 +725,8 @@ def _estrai_pagina(testo: str, url: str, tipo: str, host: str) -> tuple[dict, li
             "video": estrattore.video,
         },
         "dati_prodotto": _dati_prodotto(estrattore.json_ld),
+        # i link fuori da menu e piede: servono a scegliere il campione (poi tolto dal dizionario)
+        "_link_contenuto": _link_interni(estrattore.link_contenuto, url, host),
         "_blocchi": estrattore.blocchi_dopo_h1 if estrattore.h1 else estrattore.blocchi,
         "_blocchi_tutti": estrattore.blocchi,
     }
@@ -892,6 +940,7 @@ def _riepilogo_tipo(pagine: list[dict]) -> dict:
         "h2_ricorrenti": [{"testo": t, "pagine": c} for t, c in h2.most_common(8) if c >= 2],
         "dati_strutturati": dict(schema.most_common()),
         "parole_medie": _media([p["n_parole"] for p in pagine]),
+        "parole_proprie_medie": _media([p["parole_proprie"] for p in pagine]),
         "immagini_senza_alt_percentuale": _percentuale(
             sum(p["immagini_senza_alt"] for p in pagine), totale_immagini
         ),
@@ -929,6 +978,7 @@ def _vista_pagina(pagina: dict, max_caratteri: int) -> dict:
         "h2": pagina["h2"][:5],
         "dati_strutturati": pagina["dati_strutturati"],
         "n_parole": pagina["n_parole"],
+        "parole_proprie": pagina["parole_proprie"],
         "struttura": pagina["struttura"],
         "dati_prodotto": dati_prodotto,
         "estratto": pagina["estratto"],
@@ -1040,6 +1090,8 @@ def _chiudi_analisi(
     testo, valutazione della struttura SEO, salvataggio dei testi per
     controlla_somiglianza e costruzione del report. `in_rete` e' False per le
     pagine salvate, dove sitemap e HTTPS non sono verificabili."""
+    for pagina in pagine:
+        pagina.pop("_link_contenuto", None)
     avviso_identiche = _avviso_pagine_identiche(pagine)
     if avviso_identiche:
         avvisi.append(avviso_identiche)
@@ -1151,7 +1203,12 @@ def _analizza(
         )
     else:
         trovati, sitemap, altri = _urls_dalla_sitemap(scaricatore)
-    link_tutti = list(link_home)
+    # Quando il campione viene dai link della pagina contano solo quelli del contenuto: i
+    # link di menu, intestazione e piede portano ad altri reparti, non alla categoria.
+    # (Se la pagina non ha link fuori da quelle zone, si usano tutti.)
+    link_tutti = home["_link_contenuto"] or list(link_home)
+    if modo_pagina:
+        link_home = link_tutti
     # La pagina da cui si parte non e' un elemento del campione (la sitemap la elenca, a volte).
     iniziale = risposta_home.url.rstrip("/")
     trovati = {t: [u for u in v if u.rstrip("/") != iniziale] for t, v in trovati.items()}

@@ -157,8 +157,9 @@ Copia `.env.example` in `.env` e compila:
   tecnici) e complessivo, con la prova di ogni criterio. Dice se il sito è un buon modello
   da cui prendere spunto: è solo un riferimento, e un sito scadente può essere buono su
   un'area. Le soglie (lunghezze di titolo e meta, parole minime) sono costanti in testa al
-  modulo. Alcuni difetti gravi pongono un **tetto** al voto dell'area (ALT mancante oltre il
-  35% delle immagini: contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su più
+  modulo. Alcuni difetti gravi pongono un **tetto** al voto dell'area (ALT mancante a
+  scaglioni: oltre il 15% delle immagini contenuto al massimo 8, oltre il 25% 7, oltre il 35% 6,
+  oltre il 50% 5, oltre il 75% 3; H3 senza H2 su più
   della metà delle pagine: intestazioni al massimo 6); il report mostra ogni tetto con la sua
   misura e il suo effetto. Regole decise con l'utente: una meta description vale in base a
   quanto aggiunge al titolo (testo proprio 1; titolo più frase generica uguale su più della

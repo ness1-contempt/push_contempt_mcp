@@ -14,8 +14,8 @@ un riferimento per l'utilizzatore, non vincolante: decide lui se e per quali
 aree usare il sito come ispirazione.
 
 Oltre alla media dei criteri ci sono i "tetti": regole esplicite che limitano il voto
-di un'area quando c'e' un difetto grave, qualunque sia la media (immagini senza ALT
-oltre il 35% -> contenuto al massimo 6, oltre il 50% al massimo 5; H3 senza H2 su piu'
+di un'area quando c'e' un difetto grave, qualunque sia la media (immagini senza ALT:
+a scaglioni dal 15% in su, il contenuto scende da 8 fino a 3; H3 senza H2 su piu'
 della meta' delle pagine -> intestazioni al massimo 6). Il report mostra sempre ogni
 tetto con la sua misura, anche quando non scatta, e l'effetto che ha avuto. Le soglie sono
 costanti in testa al modulo.
@@ -58,10 +58,10 @@ SIGNIFICATO = {
 
 # Tetti: un difetto grave limita il voto di un'area, qualunque sia la media dei criteri.
 # Il report li mostra sempre (regola, misura, se scatta e con quale effetto).
-ALT_MANCANTE_OLTRE = 0.35  # quota di immagini senza ALT oltre la quale scatta il tetto
-TETTO_ALT = 6  # voto massimo dell'area contenuto
-ALT_MANCANTE_OLTRE_2 = 0.5  # secondo livello: oltre la meta' delle immagini senza ALT
-TETTO_ALT_2 = 5
+# Immagini senza ALT: piu' scaglioni, cosi' il voto scende a gradini piccoli invece che di colpo.
+# (quota oltre la quale scatta, voto massimo dell'area contenuto). Un po' di immagini senza ALT
+# e' normale (decorazioni, icone): la prima soglia e' al 15%.
+SCAGLIONI_ALT = ((0.15, 8), (0.25, 7), (0.35, 6), (0.50, 5), (0.75, 3))
 PAGINE_H3_SENZA_H2_OLTRE = 0.5  # quota di pagine con H3 ma senza H2 oltre la quale scatta
 TETTO_GERARCHIA = 6  # voto massimo dell'area intestazioni
 
@@ -516,20 +516,16 @@ def _tetti_contenuto(pagine: list[dict]) -> list[dict]:
     if not immagini:
         return []
     senza_alt = sum(p["immagini_senza_alt"] for p in pagine)
-    misura = f"immagini senza ALT: {senza_alt} su {immagini} ({round(100 * senza_alt / immagini)}%)"
+    quota = senza_alt / immagini
+    superati = [voto for soglia, voto in SCAGLIONI_ALT if quota > soglia]
+    scaglioni = ", ".join(f"oltre il {round(100 * s)}%: max {v}" for s, v in SCAGLIONI_ALT)
     return [
         _tetto(
-            f"immagini senza ALT oltre il {round(100 * ALT_MANCANTE_OLTRE)}%",
-            misura,
-            senza_alt > ALT_MANCANTE_OLTRE * immagini,
-            TETTO_ALT,
-        ),
-        _tetto(
-            f"immagini senza ALT oltre il {round(100 * ALT_MANCANTE_OLTRE_2)}%",
-            misura,
-            senza_alt > ALT_MANCANTE_OLTRE_2 * immagini,
-            TETTO_ALT_2,
-        ),
+            f"immagini senza ALT, per scaglioni ({scaglioni})",
+            f"immagini senza ALT: {senza_alt} su {immagini} ({round(100 * quota)}%)",
+            bool(superati),
+            min(superati) if superati else SCAGLIONI_ALT[0][1],
+        )
     ]
 
 

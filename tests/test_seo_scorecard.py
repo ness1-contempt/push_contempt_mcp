@@ -243,22 +243,40 @@ def _intestazioni(pagine):
     return valuta(pagine, True, True)["aree"]["intestazioni"]
 
 
-def test_alt_mancante_oltre_il_35_percento_limita_il_contenuto_a_6():
-    # 10 pagine con 10 immagini ciascuna: 4 su 10 senza ALT = 40% > 35%
-    pagine = [pagina("prodotto", i, immagini=10, immagini_senza_alt=4) for i in range(10)]
-    area = _contenuto(pagine)
+def _tetto_alt(senza_alt, immagini=100):
+    per_pagina = immagini // 10
+    pagine = [pagina("prodotto", i, immagini=per_pagina, immagini_senza_alt=0) for i in range(10)]
+    # distribuisce le immagini senza ALT sulle prime pagine
+    restanti = senza_alt
+    for p in pagine:
+        p["immagini_senza_alt"] = min(p["immagini"], restanti)
+        restanti -= p["immagini_senza_alt"]
+    return _contenuto(pagine)
 
-    assert area["punteggio"] == 6
+
+def test_alt_mancante_a_scaglioni_il_voto_massimo_scende_a_gradini():
+    attesi = {10: None, 16: 8, 26: 7, 36: 6, 51: 5, 76: 3}  # % senza ALT -> voto massimo
+    for percentuale, massimo in attesi.items():
+        area = _tetto_alt(percentuale)
+        (tetto,) = area["tetti"]
+        assert tetto["scatta"] is (massimo is not None), percentuale
+        if massimo is not None:
+            assert tetto["voto_massimo"] == massimo, percentuale
+            assert area["punteggio"] <= massimo
+
+
+def test_alt_mancante_il_tetto_riporta_misura_e_scaglioni():
+    area = _tetto_alt(40)
+    (tetto,) = area["tetti"]
+
+    assert tetto["misura"] == "immagini senza ALT: 40 su 100 (40%)"
+    assert "oltre il 15%: max 8" in tetto["regola"] and "oltre il 75%: max 3" in tetto["regola"]
+    assert tetto["effetto"].startswith("abbassa il voto da ")
     assert area["punteggio_prima_dei_tetti"] > 6  # senza il tetto sarebbe piu' alto
-    primo, secondo = area["tetti"]
-    assert primo["scatta"] is True and primo["voto_massimo"] == 6
-    assert primo["misura"] == "immagini senza ALT: 40 su 100 (40%)"
-    assert primo["effetto"].startswith("abbassa il voto da ")
-    assert secondo["scatta"] is False  # il 50% non e' superato
 
 
-def test_alt_mancante_esattamente_al_35_percento_non_fa_scattare_il_tetto():
-    pagine = [pagina("prodotto", i, immagini=20, immagini_senza_alt=7) for i in range(5)]  # 35%
+def test_alt_mancante_esattamente_alla_soglia_non_fa_scattare_lo_scaglione():
+    pagine = [pagina("prodotto", i, immagini=20, immagini_senza_alt=3) for i in range(5)]  # 15%
     area = _contenuto(pagine)
 
     assert area["tetti"][0]["scatta"] is False
@@ -284,7 +302,7 @@ def test_il_tetto_non_alza_mai_un_voto_gia_basso():
     area = _contenuto(pagine)
 
     assert area["punteggio"] < 6  # gia' sotto il limite del tetto
-    assert all(t["scatta"] for t in area["tetti"])  # 100% senza ALT: scattano entrambi
+    assert all(t["scatta"] for t in area["tetti"])  # 100% senza ALT: scatta l'ultimo scaglione
     assert all(t["effetto"].startswith("nessun effetto") for t in area["tetti"])
     assert "punteggio_prima_dei_tetti" not in area
 
@@ -328,17 +346,6 @@ def test_i_tetti_pesano_sul_punteggio_complessivo():
     assert con_difetti["aree"]["contenuto"]["punteggio"] == 6
     assert con_difetti["aree"]["intestazioni"]["punteggio"] == 6
     assert con_difetti["punteggio"] < buoni["punteggio"]
-
-
-def test_alt_mancante_oltre_il_50_percento_limita_il_contenuto_a_5():
-    pagine = [pagina("prodotto", i, immagini=10, immagini_senza_alt=6) for i in range(10)]  # 60%
-    area = _contenuto(pagine)
-
-    assert area["punteggio"] == 5
-    primo, secondo = area["tetti"]
-    assert primo["scatta"] and secondo["scatta"]
-    assert secondo["voto_massimo"] == 5 and "oltre il 50%" in secondo["regola"]
-    assert secondo["effetto"].startswith("abbassa il voto da ")
 
 
 # --- meta description: quanto aggiunge al titolo -----------------------------

@@ -1725,3 +1725,101 @@ def test_le_pagine_archivio_non_sono_prodotti(monkeypatch):
     assert f"{base}/shop" not in richieste
     assert competitor_seo._e_archivio(f"{base}/shop")
     assert not competitor_seo._e_archivio(f"{base}/prodotto/telefono-1/")
+
+
+# --- link di navigazione, testo di debug ---------------------------------------
+
+
+def test_estrai_pagina_separa_i_link_del_contenuto_da_quelli_di_menu_e_piede():
+    html = (
+        '<html><body><header><a href="/it/category/tv-1.html">TV</a></header>'
+        '<nav><a href="/it/category/giochi-2.html">Giochi</a></nav>'
+        '<main><h1>Smartphone</h1><a href="/it/product/_a-1.html">A</a></main>'
+        '<footer><a href="/it/category/chi-siamo-3.html">Chi siamo</a></footer></body></html>'
+    )
+    pagina, interni = _estrai_pagina(html, "https://esempio.it/", "sezione", "esempio.it")
+
+    assert pagina["_link_contenuto"] == ["https://esempio.it/it/product/_a-1.html"]
+    assert len(interni) == 4  # tutti i link restano disponibili, per il campione dalla home
+
+
+def test_il_campione_da_una_pagina_di_categoria_ignora_i_link_di_menu_e_piede(monkeypatch):
+    sito, prodotti, sottocategorie = _categoria_piatta()
+    base = "https://esempio.it"
+    inizio = f"{base}/it/category/telefoni-1001.html"
+    altro_reparto = f"{base}/it/category/nintendo-switch-300507.html"
+    prodotto_altrove = f"{base}/it/product/_tv-lg-77.html"
+    pagina = sito[inizio][1].replace(
+        "<body>",
+        f'<body><nav><a href="{altro_reparto}">Giochi</a></nav>'
+        f'<footer><a href="{prodotto_altrove}">TV</a></footer>',
+        1,
+    )
+    sito[inizio] = (200, pagina)
+    sito[altro_reparto] = (200, _pagina_html("Giochi", "Giochi"))
+    sito[prodotto_altrove] = (200, _pagina_html("TV", "TV"))
+    richieste = _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(inizio, max_categorie=10, max_prodotti=30)
+
+    campionati = {p["url"] for p in report["pagine"][1:]}
+    assert campionati == set(prodotti) | set(sottocategorie)
+    assert altro_reparto not in richieste and prodotto_altrove not in richieste
+
+
+def test_se_la_pagina_ha_solo_link_di_menu_si_usano_quelli(monkeypatch):
+    base = "https://esempio.it"
+    inizio = f"{base}/it/category/telefoni-1001.html"
+    prodotti = [f"{base}/it/product/_m-{i}-{9000 + i}.html" for i in range(6)]
+    link = "".join(f'<a href="{u}">x</a>' for u in prodotti)
+    pagina = f"<html><head><title>T</title></head><body><nav>{link}</nav><h1>Telefoni</h1></body>"
+    sito = {inizio: (200, pagina)}
+    for u in prodotti:
+        sito[u] = (200, _pagina_html("P", "P"))
+    _sito_finto(monkeypatch, sito)
+
+    report = analizza_seo_sito(inizio, max_prodotti=30)
+
+    assert report["campione"]["prodotti"] == 6
+
+
+PAGINA_CON_DEBUG = """<html><head><title>Telefono</title></head><body>
+<h1>Telefono</h1>
+<p>Un telefono con schermo grande e batteria che dura due giorni.</p>
+<div id="data-bv-show"><ul id="BVSEOSDK_meta" style="display: none !important;">
+<li>bvseo_sdk, dw_cartridge, 18.2.0</li><li>CLOUD, getAggregateRating, 4ms</li>
+<li>reviews, product</li><li>bvseo-msg: Unsuccessful GET.</li></ul></div>
+<p>Notice: Undefined variable x in /var/www/a.php on line 12</p>
+<p>Prezzo: undefined</p>
+<p>La spedizione e' gratuita sopra i cinquanta euro.</p>
+</body></html>"""
+
+
+def test_il_testo_di_debug_non_conta_ne_come_parole_ne_come_blocchi():
+    pagina, _ = _estrai_pagina(PAGINA_CON_DEBUG, "https://esempio.it/p/", "prodotto", "esempio.it")
+
+    assert pagina["_blocchi"] == [
+        "Un telefono con schermo grande e batteria che dura due giorni.",
+        "La spedizione e' gratuita sopra i cinquanta euro.",
+    ]
+    # h1 (1) + 11 parole + 8 parole: il resto e' debug
+    assert pagina["n_parole"] == 1 + 11 + 8
+
+
+def test_il_contenitore_di_debug_chiude_con_il_suo_tag_anche_se_annidato():
+    html = (
+        '<body><h1>T</h1><div class="bvseo-x"><div>interno</div><ul><li>riga</li></ul></div>'
+        "<p>testo vero dopo</p></body>"
+    )
+    pagina, _ = _estrai_pagina(html, "https://esempio.it/p/", "prodotto", "esempio.it")
+
+    assert pagina["_blocchi"] == ["testo vero dopo"]
+
+
+def test_il_report_distingue_parole_della_pagina_e_parole_proprie(monkeypatch):
+    _sito_finto(monkeypatch, _negozio_finto())
+    report = analizza_seo_sito("https://esempio.it")
+
+    prodotto = next(p for p in report["pagine"] if p["url"].endswith("telefono-1/"))
+    assert 0 < prodotto["parole_proprie"] < prodotto["n_parole"]  # il template non e' "proprio"
+    assert "parole_proprie_medie" in report["riepilogo_per_tipo"]["prodotto"]
