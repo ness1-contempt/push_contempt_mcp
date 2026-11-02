@@ -16,6 +16,7 @@ from mcp.server.mcpserver import MCPServer
 
 from push_contempt_mcp import (
     alt_tools,
+    azioni_pubbliche_tools,
     browser_tools,
     cache_tools,
     catalog_health,
@@ -88,7 +89,24 @@ mcp = MCPServer(
         "disponibilita', colore, taglia) li genera il plugin da solo: non esiste un tool, non "
         "scriverli tu nella descrizione. I problemi `variante_senza_prezzo`, "
         "`variante_qualsiasi` e `combinazione_duplicata` non si correggono da qui: sono errori di "
-        "catalogo da sistemare in wp-admin, riportali all'utente."
+        "catalogo da sistemare in wp-admin, riportali all'utente.\n\n"
+        "AZIONI VISIBILI A TUTTI - PUBBLICARE BOZZE E SPOSTARE CATEGORIE: pubblica_prodotti e "
+        "sposta_categoria_prodotti cambiano il sito pubblico, quindi si fanno SOLO cosi': (1) "
+        "chiami il tool con anteprima=True (e' il predefinito) e ottieni cosa succederebbe e "
+        "un `codice_conferma`; (2) mostri all'utente il risultato per intero (per i prodotti: "
+        "l'elenco, gli `avvisi` di ciascuno e quelli `non_pubblicabili` con i motivi; per la "
+        "categoria: percorso prima e dopo, indirizzi, sottocategorie, prodotti coinvolti e "
+        "avvisi) e gli chiedi esplicitamente se vuole procedere; (3) SOLO dopo un suo si "
+        "chiaro a QUELLA lista richiami con anteprima=False e il `codice_conferma` ricevuto. "
+        "Non dedurre il consenso da richieste generiche ('sistema tutto', 'metti online le "
+        "bozze'): anche in quel caso fai l'anteprima e chiedi. Se cambia la lista o l'utente "
+        "aggiunge qualcosa, rifai l'anteprima e richiedi il si; se il plugin risponde che il "
+        "codice non vale piu', rifai l'anteprima. Non ripetere l'azione su elementi gia' "
+        "fatti. Per trovare l'id di una categoria usa lista_categorie_prodotti. Un prodotto "
+        "con avvisi (niente immagine, campi SEO vuoti) si puo' pubblicare se l'utente lo "
+        "vuole, ma diglielo; i bloccanti (niente prezzo, varianti sbagliate) si correggono in "
+        "wp-admin. Spostare una categoria cambia il suo indirizzo: riporta sempre l'avviso "
+        "sul redirect."
     ),
 )
 
@@ -155,7 +173,8 @@ def crea_prodotto(
     per ogni immagine (stesso ordine di percorsi_immagini). La risposta include
     `avvisi_seo`: se non vuoto, la descrizione non rispetta ancora densita'
     della frase chiave, sottotitoli o link interni - da sistemare. Non viene
-    pubblicato: resta da rivedere e pubblicare da wp-admin (vedi
+    pubblicato: resta da rivedere e pubblicare da wp-admin o, solo se l'utente
+    lo chiede e dopo la sua conferma, con pubblica_prodotti (vedi
     prodotti_in_bozza e la tab "Carica prodotti" del plugin), quindi non
     serve invalidare la cache del sito.
 
@@ -267,7 +286,8 @@ def crea_prodotto_variabile(
 @mcp.tool()
 def prodotti_in_bozza() -> list[dict]:
     """Prodotti creati con crea_prodotto e non ancora pubblicati, piu'
-    recenti prima: promemoria di cosa resta da rivedere su wp-admin.
+    recenti prima: promemoria di cosa resta da rivedere su wp-admin. Per
+    pubblicarle c'e' pubblica_prodotti (anteprima e conferma dell'utente).
     """
     return product_tools.prodotti_in_bozza()
 
@@ -583,6 +603,74 @@ def aggiorna_seo_varianti(
     """
     risultato = seo_varianti_tools.aggiorna_seo_varianti(prodotto_id, varianti, solo_anteprima)
     if "errore" in risultato or solo_anteprima:
+        return risultato
+    return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def lista_categorie_prodotti() -> list[dict] | dict:
+    """Le categorie prodotto del sito: `id`, `nome`, `percorso` ("Indumenti > Magliette"),
+    `livello`, `madre` (id, 0 = radice), numero di `prodotti` pubblicati, `predefinita`
+    ("Senza categoria", che non si sposta) e `url`. Sola lettura: serve a trovare gli id per
+    sposta_categoria_prodotti.
+    """
+    return azioni_pubbliche_tools.lista_categorie_prodotti()
+
+
+@mcp.tool()
+def sposta_categoria_prodotti(
+    categoria_id: int,
+    nuova_madre_id: int,
+    anteprima: bool = True,
+    codice_conferma: str | None = None,
+) -> dict:
+    """Sposta una categoria prodotto (con tutte le sue sottocategorie) sotto un'altra
+    (`nuova_madre_id`), o alla radice con 0. Gli id vengono da lista_categorie_prodotti.
+    Cambia l'indirizzo pubblico della categoria: AZIONE VISIBILE A TUTTI, da fare solo con
+    anteprima e conferma esplicita dell'utente (vedi le istruzioni del server).
+
+    `anteprima=True` (predefinito): non sposta niente. Restituisce percorso prima/dopo,
+    indirizzo prima/dopo, le sottocategorie, i prodotti nel ramo (totale e pubblicati), gli
+    `avvisi` (compreso che WordPress non crea un redirect 301: il vecchio indirizzo continua
+    a rispondere ma ha come canonical il nuovo) e un `codice_conferma`.
+
+    `anteprima=False` richiede il `codice_conferma` dell'anteprima mostrata all'utente: se
+    l'albero e' cambiato dopo l'anteprima il plugin rifiuta e va rifatta. Rifiuta anche
+    spostare la categoria predefinita, una categoria dentro se stessa o una sua figlia,
+    superare i 5 livelli. I prodotti restano nelle loro categorie. Invalida la cache del sito.
+    """
+    risultato = azioni_pubbliche_tools.sposta_categoria_prodotti(
+        categoria_id, nuova_madre_id, anteprima, codice_conferma
+    )
+    if "errore" in risultato or anteprima:
+        return risultato
+    return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def pubblica_prodotti(
+    prodotto_ids: list[int],
+    anteprima: bool = True,
+    codice_conferma: str | None = None,
+) -> dict:
+    """Pubblica bozze di prodotti (al massimo 50 per volta; elenco delle bozze:
+    prodotti_in_bozza). Rende i prodotti visibili a tutti: AZIONE VISIBILE A TUTTI, da fare
+    solo con anteprima e conferma esplicita dell'utente (vedi le istruzioni del server).
+
+    `anteprima=True` (predefinito): non pubblica niente. Restituisce `da_pubblicare` (con
+    categorie, prezzo e `avvisi`: niente immagine, titolo SEO / meta description / parola
+    chiave vuoti, solo categoria predefinita), `non_pubblicabili` (con i `motivi`: non e' una
+    bozza, niente prezzo, varianti sbagliate: si correggono in wp-admin), `non_trovati` e un
+    `codice_conferma`.
+
+    `anteprima=False` richiede il `codice_conferma` dell'anteprima mostrata all'utente: se
+    anche solo un prodotto (o i suoi campi SEO) e' cambiato dopo, o la lista e' diversa, il
+    plugin rifiuta e va rifatta l'anteprima. Pubblica solo i `da_pubblicare` e restituisce
+    `pubblicati` (con indirizzo) e `falliti`. Invalida la cache del sito. Non esiste un tool
+    per rimettere in bozza: si fa da wp-admin.
+    """
+    risultato = azioni_pubbliche_tools.pubblica_prodotti(prodotto_ids, anteprima, codice_conferma)
+    if "errore" in risultato or anteprima:
         return risultato
     return {**risultato, **cache_tools.purga_cache()}
 

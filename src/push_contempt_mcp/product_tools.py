@@ -2,8 +2,9 @@
 push_contempt (vedi includes/Rest/ProdottiController.php) - stesso principio
 di inventory_tools.py e pricing_tools.py.
 
-Il prodotto nasce sempre in BOZZA (status=draft): la REST API non pubblica
-nulla, resta da rivedere e pubblicare da wp-admin. `prodotti_in_bozza` legge
+Il prodotto nasce sempre in BOZZA (status=draft): la creazione non pubblica
+nulla, resta da rivedere e pubblicare da wp-admin (o, su richiesta esplicita
+dell'utente e con la sua conferma, con `pubblica_prodotti`). `prodotti_in_bozza` legge
 quella lista (lo stato "draft" stesso e' il promemoria persistente, nessun
 tracciamento a parte).
 """
@@ -61,7 +62,7 @@ def crea_prodotto(
 ) -> dict:
     """Crea un prodotto WooCommerce in BOZZA (titolo, descrizione, prezzo,
     categoria, immagini), con SEO e ALT immagini gia' impostati: resta solo
-    da rivedere e pubblicare da wp-admin (vedi `prodotti_in_bozza`).
+    da rivedere e pubblicare da wp-admin o con `pubblica_prodotti` (vedi `prodotti_in_bozza`).
 
     `percorsi_immagini[0]` diventa l'immagine in evidenza, le altre vanno
     nella galleria. `alt_immagini` deve avere un elemento per ogni immagine

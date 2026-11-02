@@ -85,7 +85,8 @@ pagina Releases.
   descrizione, prezzo, categoria o `percorso_categoria`, immagini: la prima diventa quella in
   evidenza, le altre vanno in galleria), con SEO e ALT delle immagini già
   impostati nella stessa chiamata. Non viene mai pubblicato in automatico:
-  resta da rivedere e pubblicare da wp-admin. La risposta include
+  resta da rivedere e pubblicare da wp-admin (o con `pubblica_prodotti`, su
+  richiesta e con la conferma dell'utente). La risposta include
   `avvisi_seo` (densità frase chiave, sottotitoli H2/H3, link interni) da
   controllare prima di considerare il prodotto pronto.
 - `crea_prodotto_variabile` — come `crea_prodotto` ma per un prodotto **con varianti**
@@ -95,6 +96,16 @@ pagina Releases.
   mostra le varianti che nascerebbero. Solo con `anteprima=False` crea davvero. Due modi
   per dare gli attributi, vedi sotto.
 - `prodotti_in_bozza` — elenco dei prodotti creati e non ancora pubblicati.
+- `pubblica_prodotti` — pubblica bozze (max 50 per volta). **Azione visibile a tutti, sempre in due
+  tempi:** l'anteprima (predefinita) non pubblica niente, elenca cosa verrebbe pubblicato con gli
+  avvisi (niente immagine, SEO vuota...) e cosa no con i motivi (niente prezzo, varianti sbagliate),
+  e restituisce un `codice_conferma`; la pubblicazione vera lo richiede e il plugin la rifiuta se
+  anche un solo prodotto è cambiato dopo l'anteprima.
+- `lista_categorie_prodotti` — l'albero delle categorie con id, percorso, livello, prodotti e indirizzo.
+- `sposta_categoria_prodotti` — sposta una categoria (con le sottocategorie) sotto un'altra o alla
+  radice. Stessa regola: anteprima con percorso e indirizzo prima/dopo, prodotti coinvolti e avvisi
+  (WordPress non crea il redirect 301: il vecchio indirizzo resta raggiungibile con canonical sul nuovo),
+  poi l'azione vera solo con il `codice_conferma`.
 
 **Categorie: l'albero delle cartelle**
 - Con `percorso_categoria` (es. `["Indumenti", "Magliette"]`) le categorie che mancano si creano
