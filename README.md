@@ -49,7 +49,9 @@ Copia `.env.example` in `.env` e compila:
 - `controllo_salute_catalogo` — prodotti pubblicati ma incompleti (nessuna
   immagine in evidenza, nessuna categoria, prezzo non valido, descrizione
   troppo corta).
-- `prodotti_sotto_scorta` — prodotti esauriti o sotto una soglia di scorte.
+- `prodotti_sotto_scorta` — prodotti esauriti o sotto una soglia di scorte. Di un prodotto
+  variabile compaiono anche le singole varianti esaurite o sotto soglia (`variante`,
+  `variante_id`); quelle che ereditano le scorte dal padre non si ripetono.
 - `report_vendite_prodotti` — più venduti e mai venduti in un periodo.
 
 **Ordini** (sola lettura, richiedono il plugin ≥ della versione che include
@@ -110,6 +112,10 @@ Copia `.env.example` in `.env` e compila:
 - `analizza_link_prodotto` — i link nella descrizione di un prodotto, divisi in interni, esterni
   e altri (ancore, mailto, tel), con `ha_link_in_uscita`: la verifica che Yoast segnala più
   spesso come mancante. Sola lettura.
+- `analizza_link_prodotti` — la stessa verifica su tutti i prodotti in una chiamata: per ciascuno
+  i totali di link interni ed esterni, più i conteggi complessivi (quanti senza link in uscita,
+  quanti senza link interni); con `solo_senza_link_in_uscita` l'elenco è solo di quelli a cui
+  manca. Per gli indirizzi di un prodotto si usa `analizza_link_prodotto`.
 - `aggiorna_seo_categoria` — stessa cosa per le categorie prodotto
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).

@@ -181,3 +181,31 @@ def test_analizza_link_prodotto_inesistente_da_errore(monkeypatch):
     _finti(monkeypatch, get=_RispostaFinta({"message": "Nessun prodotto con id 9"}, 404))
 
     assert analizza_link_prodotto(9) == {"errore": "Nessun prodotto con id 9"}
+
+
+def test_analizza_link_prodotti_manda_i_filtri_come_testo(monkeypatch):
+    from push_contempt_mcp.link_tools import analizza_link_prodotti
+
+    dati = {"analizzati": 20, "senza_link_in_uscita": 18, "senza_link_interni": 3, "prodotti": []}
+    chiamate = _finti(monkeypatch, get=_RispostaFinta(dati))
+
+    assert analizza_link_prodotti() == dati
+    analizza_link_prodotti("any", True)
+
+    assert chiamate == [
+        (
+            "GET",
+            f"{BASE}/link/prodotti",
+            {"stato": "publish", "solo_senza_link_in_uscita": "false"},
+        ),
+        ("GET", f"{BASE}/link/prodotti", {"stato": "any", "solo_senza_link_in_uscita": "true"}),
+    ]
+
+
+def test_analizza_link_prodotti_rifiuta_uno_stato_sconosciuto(monkeypatch):
+    from push_contempt_mcp.link_tools import analizza_link_prodotti
+
+    chiamate = _finti(monkeypatch, get=_RispostaFinta({}))
+
+    assert "errore" in analizza_link_prodotti("trash")
+    assert chiamate == []

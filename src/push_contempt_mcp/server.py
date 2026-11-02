@@ -189,6 +189,12 @@ def prodotti_sotto_scorta(soglia: float = 5) -> list[dict]:
     stato esaurito/in attesa, non c'è un numero di scorte attendibile).
     Esauriti per primi, poi per scorte crescenti: utile per capire cosa
     rifornire con più urgenza.
+
+    Di un prodotto variabile compaiono anche le singole varianti pubblicate
+    esaurite o sotto soglia (taglia, colore...): hanno lo stesso `id` del
+    prodotto, con `variante` (es. "Taglia: L") e `variante_id` valorizzati.
+    Una variante che eredita le scorte dal padre non si ripete: la copre la
+    riga del padre.
     """
     return inventory_tools.prodotti_sotto_scorta(soglia)
 
@@ -367,6 +373,20 @@ def analizza_link_prodotto(prodotto_id: int) -> dict:
     aggiorna_descrizione_prodotto.
     """
     return link_tools.analizza_link_prodotto(prodotto_id)
+
+
+@mcp.tool()
+def analizza_link_prodotti(stato: str = "publish", solo_senza_link_in_uscita: bool = False) -> dict:
+    """Controlla i link della descrizione di TUTTI i prodotti in una chiamata:
+    per ciascuno quanti link interni ed esterni ha e se ha link in uscita (la
+    verifica che Yoast segnala piu' spesso come mancante). In testa i conteggi:
+    prodotti analizzati, senza link in uscita, senza link interni. Non elenca gli
+    indirizzi: per quelli di un prodotto usa analizza_link_prodotto. `stato` e'
+    "publish" (default), "draft" o "any"; con `solo_senza_link_in_uscita` l'elenco
+    contiene solo i prodotti a cui manca un link in uscita (i conteggi in testa
+    restano riferiti a tutti).
+    """
+    return link_tools.analizza_link_prodotti(stato, solo_senza_link_in_uscita)
 
 
 @mcp.tool()

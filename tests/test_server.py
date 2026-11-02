@@ -33,6 +33,7 @@ async def test_list_tools():
             "aggiorna_descrizione_prodotto",
             "ripristina_descrizione_prodotti",
             "analizza_link_prodotto",
+            "analizza_link_prodotti",
             "leggi_alt_immagini_prodotto",
             "aggiorna_alt_immagini_prodotto",
             "aggiorna_seo_categoria",
