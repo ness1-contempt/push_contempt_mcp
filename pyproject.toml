@@ -1,6 +1,6 @@
 [project]
 name = "push_contempt_mcp"
-version = "0.1.14"
+version = "0.1.15"
 description = "Server MCP in Python"
 readme = "README.md"
 license = "MIT"
