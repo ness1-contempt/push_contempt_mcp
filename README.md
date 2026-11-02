@@ -160,6 +160,12 @@ pagina Releases.
   dell'immagine in evidenza e della galleria, con la parola chiave focus Yoast a
   portata di mano. In scrittura si indicano gli `allegato_id` da cambiare; gli
   allegati che non sono del prodotto vengono rifiutati.
+- `leggi_seo_varianti` / `aggiorna_seo_varianti` — SEO dei prodotti **variabili**: attributi,
+  varianti (prezzo, SKU, immagine, descrizione) e i problemi trovati, dal più grave; in
+  scrittura descrizione e/o SKU delle varianti (rifiuta varianti non del prodotto e SKU già
+  in uso, con `solo_anteprima` non salva). Le immagini delle varianti si trattano con gli
+  strumenti ALT (ruolo «variante»). Le regole per l'assistente e i dati strutturati
+  `ProductGroup` che genera il plugin sono nella wiki, pagina «SEO dei prodotti variabili».
 - `analizza_link_prodotto` — i link nella descrizione di un prodotto, divisi in interni, esterni
   e altri (ancore, mailto, tel), con `ha_link_in_uscita`: la verifica che Yoast segnala più
   spesso come mancante. Sola lettura.
