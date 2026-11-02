@@ -38,6 +38,14 @@ Copia `.env.example` in `.env` e compila:
   mentre il reCAPTCHA "Non sono un robot" va spuntato a mano nella finestra
   del browser (si aspetta fino a 2 minuti).
 
+## Versioni
+
+Il server e il [plugin push_contempt](https://github.com/ness1-contempt/push_contempt) hanno **lo stesso numero di
+versione** e lo cambiano insieme a ogni pubblicazione (stesso tag, per esempio `v0.1.14` su entrambi). Per
+funzionare bene usa le due parti con lo stesso numero: se un tool risponde che una rotta non esiste, il plugin
+sul sito è più vecchio del server. Il server si aggiorna con `git pull`, il plugin reinstallando lo zip della
+pagina Releases.
+
 ## Tool disponibili
 
 **Catalogo**
