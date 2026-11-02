@@ -76,31 +76,65 @@ def crea_prodotto(
             "un ALT per ogni immagine, stesso ordine."
         )
 
-    attachment_ids = [_carica_immagine(percorso) for percorso in percorsi_immagini]
+    try:
+        attachment_ids = [_carica_immagine(percorso) for percorso in percorsi_immagini]
+    except FileNotFoundError as errore:
+        return {
+            "errore": f"Immagine non trovata: {errore.filename}. I percorsi vanno indicati "
+            "come sono sul computer dove gira il server MCP.",
+            "creato": False,
+        }
+    except requests.RequestException as errore:
+        return {
+            "errore": f"Caricamento di un'immagine non riuscito: {_dettaglio(errore)}",
+            "creato": False,
+        }
+
+    corpo = {
+        "titolo": titolo,
+        "descrizione": descrizione,
+        "prezzo_regolare": prezzo_regolare,
+        "categoria": categoria,
+        "galleria_ids": attachment_ids[1:],
+        "alt_immagini": dict(zip(attachment_ids, alt_immagini, strict=True)),
+        "titolo_seo": titolo_seo,
+        "meta_description": meta_description,
+        "parola_chiave_focus": frase_chiave_focus,
+    }
+    if attachment_ids:
+        # Senza immagini la chiave non va mandata: un null non e' un intero (400 dal plugin).
+        corpo["immagine_evidenza_id"] = attachment_ids[0]
 
     site = os.environ["WP_SITE_URL"]
-    risposta = requests.post(
-        f"{site}/wp-json/push-contempt/v1/prodotti",
-        json={
-            "titolo": titolo,
-            "descrizione": descrizione,
-            "prezzo_regolare": prezzo_regolare,
-            "categoria": categoria,
-            "immagine_evidenza_id": attachment_ids[0] if attachment_ids else None,
-            "galleria_ids": attachment_ids[1:],
-            "alt_immagini": dict(zip(attachment_ids, alt_immagini, strict=True)),
-            "titolo_seo": titolo_seo,
-            "meta_description": meta_description,
-            "parola_chiave_focus": frase_chiave_focus,
-        },
-        auth=_auth(),
-        verify=False,
-        timeout=30,
-    )
-    risposta.raise_for_status()
+    try:
+        risposta = requests.post(
+            f"{site}/wp-json/push-contempt/v1/prodotti",
+            json=corpo,
+            auth=_auth(),
+            verify=False,
+            timeout=30,
+        )
+        risposta.raise_for_status()
+    except requests.RequestException as errore:
+        return {
+            "errore": f"Creazione del prodotto non riuscita: {_dettaglio(errore)}",
+            "creato": False,
+        }
     risultato = risposta.json()
     risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
     return risultato
+
+
+def _dettaglio(errore: requests.RequestException) -> str:
+    """Stato e messaggio che manda WordPress, non solo "400 Client Error"."""
+    risposta = getattr(errore, "response", None)
+    if risposta is None:
+        return str(errore)
+    try:
+        messaggio = risposta.json().get("message", risposta.text)
+    except ValueError:
+        messaggio = risposta.text
+    return f"HTTP {risposta.status_code}: {messaggio}"
 
 
 def prodotti_in_bozza() -> list[dict]:

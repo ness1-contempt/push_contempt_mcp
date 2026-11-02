@@ -130,3 +130,78 @@ def test_elenco_prodotti_propaga_errori_http(monkeypatch):
 
     with pytest.raises(requests.HTTPError):
         product_tools.elenco_prodotti()
+
+
+def _crea_senza_immagini():
+    return product_tools.crea_prodotto(
+        titolo="Prodotto senza foto",
+        descrizione="<p>Descrizione.</p>",
+        prezzo_regolare="9.90",
+        categoria="Prove",
+        percorsi_immagini=[],
+        alt_immagini=[],
+        frase_chiave_focus="prodotto senza foto",
+        titolo_seo="Titolo",
+        meta_description="Meta",
+    )
+
+
+def test_crea_prodotto_senza_immagini_non_manda_immagine_evidenza_null(monkeypatch):
+    chiamate = []
+
+    def post_finto(url, auth, verify, timeout, json=None, **kwargs):
+        chiamate.append(json)
+        return _RispostaFinta({"stato": "creato_in_bozza", "prodotto_id": 7})
+
+    monkeypatch.setattr(requests, "post", post_finto)
+
+    risultato = _crea_senza_immagini()
+
+    assert risultato["prodotto_id"] == 7
+    assert "immagine_evidenza_id" not in chiamate[0]  # un null darebbe 400 dal plugin
+    assert chiamate[0]["galleria_ids"] == []
+    assert chiamate[0]["alt_immagini"] == {}
+
+
+class _RispostaConErrore:
+    status_code = 400
+    text = '{"code":"rest_invalid_param","message":"Parametro non valido: categoria"}'
+
+    def json(self):
+        return {"code": "rest_invalid_param", "message": "Parametro non valido: categoria"}
+
+    def raise_for_status(self):
+        raise requests.HTTPError("400 Client Error", response=self)
+
+
+def test_crea_prodotto_riporta_il_messaggio_del_plugin_invece_di_un_errore_generico(monkeypatch):
+    monkeypatch.setattr(requests, "post", lambda *a, **k: _RispostaConErrore())
+
+    risultato = _crea_senza_immagini()
+
+    assert risultato["creato"] is False
+    assert "HTTP 400" in risultato["errore"]
+    assert "Parametro non valido: categoria" in risultato["errore"]
+
+
+def test_crea_prodotto_con_immagine_inesistente_dice_di_che_file_si_tratta(monkeypatch, tmp_path):
+    def post_che_non_deve_partire(*args, **kwargs):
+        raise AssertionError("nessuna richiesta se l'immagine non esiste")
+
+    monkeypatch.setattr(requests, "post", post_che_non_deve_partire)
+
+    risultato = product_tools.crea_prodotto(
+        titolo="X",
+        descrizione="<p>d</p>",
+        prezzo_regolare="1",
+        categoria="C",
+        percorsi_immagini=[str(tmp_path / "non-esiste.jpg")],
+        alt_immagini=["alt"],
+        frase_chiave_focus="x",
+        titolo_seo="t",
+        meta_description="m",
+    )
+
+    assert risultato["creato"] is False
+    assert "non-esiste.jpg" in risultato["errore"]
+    assert "computer dove gira il server" in risultato["errore"]
