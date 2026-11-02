@@ -102,11 +102,12 @@ mcp = MCPServer(
         "bozze'): anche in quel caso fai l'anteprima e chiedi. Se cambia la lista o l'utente "
         "aggiunge qualcosa, rifai l'anteprima e richiedi il si; se il plugin risponde che il "
         "codice non vale piu', rifai l'anteprima. Non ripetere l'azione su elementi gia' "
-        "fatti. Per trovare l'id di una categoria usa lista_categorie_prodotti. Un prodotto "
-        "con avvisi (niente immagine, campi SEO vuoti) si puo' pubblicare se l'utente lo "
-        "vuole, ma diglielo; i bloccanti (niente prezzo, varianti sbagliate) si correggono in "
-        "wp-admin. Spostare una categoria cambia il suo indirizzo: riporta sempre l'avviso "
-        "sul redirect."
+        "fatti. Per trovare l'id di una categoria usa lista_categorie_prodotti; se la "
+        "categoria di destinazione non esiste ancora creala con crea_categoria_prodotti "
+        "(anteprima e ok dell'utente). Un prodotto con avvisi (niente immagine, campi SEO "
+        "vuoti) si puo' pubblicare se l'utente lo vuole, ma diglielo; i bloccanti (niente "
+        "prezzo, varianti sbagliate) si correggono in wp-admin. Spostare una categoria cambia "
+        "il suo indirizzo: riporta sempre l'avviso sul redirect."
     ),
 )
 
@@ -615,6 +616,25 @@ def lista_categorie_prodotti() -> list[dict] | dict:
     sposta_categoria_prodotti.
     """
     return azioni_pubbliche_tools.lista_categorie_prodotti()
+
+
+@mcp.tool()
+def crea_categoria_prodotti(nome: str, madre_id: int = 0, anteprima: bool = True) -> dict:
+    """Crea una categoria prodotto da sola (senza prodotti), alla radice con `madre_id=0` o
+    sotto un'altra (id da lista_categorie_prodotti). Serve per preparare l'albero, per
+    esempio creare "Indumenti" prima di spostarci sotto "Magliette" con
+    sposta_categoria_prodotti. Le categorie dei prodotti nuovi nascono gia' da sole con il
+    `percorso_categoria` di crea_prodotto: questo tool serve solo quando la categoria deve
+    esistere prima.
+
+    `anteprima=True` (predefinito): non crea niente e mostra il `percorso_dopo`. Con
+    `anteprima=False` crea e restituisce `id`, `percorso` e `url`. Una categoria vuota non e'
+    visibile a nessuno, quindi non serve il codice di conferma: basta mostrare il percorso
+    all'utente e avere il suo ok. Un nome di categoria esiste UNA volta sola nell'albero: se
+    c'e' gia' (anche in un altro ramo) rifiuta e dice dove si trova (per metterla altrove usa
+    sposta_categoria_prodotti). Massimo 5 livelli.
+    """
+    return azioni_pubbliche_tools.crea_categoria_prodotti(nome, madre_id, anteprima)
 
 
 @mcp.tool()

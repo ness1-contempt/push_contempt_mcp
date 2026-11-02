@@ -65,6 +65,26 @@ def lista_categorie_prodotti() -> list[dict] | dict:
     return risposta.json()
 
 
+def crea_categoria_prodotti(nome: str, madre_id: int = 0, anteprima: bool = True) -> dict:
+    """Crea una categoria da sola, alla radice (`madre_id=0`) o sotto un'altra.
+    Anteprima di default. Una categoria vuota non e' visibile a nessuno, quindi qui
+    non serve il codice di conferma."""
+    if not isinstance(nome, str) or not nome.strip():
+        return {"errore": "Il nome della categoria e' vuoto."}
+    corpo = {"nome": nome, "madre": madre_id, "solo_anteprima": anteprima}
+    risposta = requests.post(_url("categorie"), json=corpo, auth=_auth(), verify=False, timeout=30)
+    if risposta.status_code in (400, 404, 409, 500):
+        return {"errore": _messaggio(risposta)}
+    risposta.raise_for_status()
+    dati = risposta.json()
+    if anteprima:
+        dati["prossimo_passo"] = (
+            "Nessuna categoria e' stata creata. Mostra all'utente `percorso_dopo` e chiedigli se "
+            "e' quello che vuole; poi richiama con anteprima=False."
+        )
+    return dati
+
+
 def sposta_categoria_prodotti(
     categoria_id: int,
     nuova_madre_id: int,

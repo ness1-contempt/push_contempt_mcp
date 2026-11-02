@@ -102,6 +102,11 @@ pagina Releases.
   e restituisce un `codice_conferma`; la pubblicazione vera lo richiede e il plugin la rifiuta se
   anche un solo prodotto è cambiato dopo l'anteprima.
 - `lista_categorie_prodotti` — l'albero delle categorie con id, percorso, livello, prodotti e indirizzo.
+- `crea_categoria_prodotti` — crea una categoria da sola (senza prodotti), alla radice o sotto
+  un'altra: serve quando la categoria deve esistere prima (per esempio «Indumenti» prima di
+  spostarci sotto «Magliette»). Anteprima di default. Un nome esiste una volta sola nell'albero (se
+  c'è già, anche in un altro ramo, rifiuta e dice dove), al massimo 5 livelli. Una categoria vuota non
+  è visibile a nessuno, quindi non serve il codice di conferma.
 - `sposta_categoria_prodotti` — sposta una categoria (con le sottocategorie) sotto un'altra o alla
   radice. Stessa regola: anteprima con percorso e indirizzo prima/dopo, prodotti coinvolti e avvisi
   (WordPress non crea il redirect 301: il vecchio indirizzo resta raggiungibile con canonical sul nuovo),

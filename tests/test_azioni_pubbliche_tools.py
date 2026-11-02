@@ -2,6 +2,7 @@ import pytest
 import requests
 
 from push_contempt_mcp.azioni_pubbliche_tools import (
+    crea_categoria_prodotti,
     lista_categorie_prodotti,
     pubblica_prodotti,
     sposta_categoria_prodotti,
@@ -162,3 +163,47 @@ def test_pubblica_rifiuta_elenchi_malformati(monkeypatch, ids):
 def test_pubblica_riporta_i_rifiuti_del_plugin(monkeypatch, stato):
     _finti(monkeypatch, post=_RispostaFinta({"message": "codice non valido"}, stato))
     assert pubblica_prodotti([7]) == {"errore": "codice non valido"}
+
+
+# --- creare una categoria --------------------------------------------------------
+
+
+def test_crea_categoria_in_anteprima_non_crea_e_chiede_l_ok(monkeypatch):
+    chiamate = _finti(
+        monkeypatch,
+        post=_RispostaFinta({"solo_anteprima": True, "percorso_dopo": "Indumenti"}),
+    )
+
+    risultato = crea_categoria_prodotti("Indumenti")
+
+    assert risultato["percorso_dopo"] == "Indumenti"
+    assert "anteprima=False" in risultato["prossimo_passo"]
+    assert chiamate == [
+        (
+            "POST",
+            f"{BASE}/categorie",
+            {"nome": "Indumenti", "madre": 0, "solo_anteprima": True},
+        )
+    ]
+
+
+def test_crea_categoria_davvero_non_chiede_il_codice(monkeypatch):
+    chiamate = _finti(monkeypatch, post=_RispostaFinta({"creata": True, "id": 30}))
+
+    risultato = crea_categoria_prodotti("Magliette", madre_id=7, anteprima=False)
+
+    assert risultato == {"creata": True, "id": 30}
+    assert chiamate[0][2] == {"nome": "Magliette", "madre": 7, "solo_anteprima": False}
+
+
+@pytest.mark.parametrize("nome", ["", "   ", None, 5])
+def test_crea_categoria_con_nome_non_valido_non_chiama_il_plugin(monkeypatch, nome):
+    chiamate = _finti(monkeypatch, post=_RispostaFinta({}))
+    assert "errore" in crea_categoria_prodotti(nome)
+    assert chiamate == []
+
+
+@pytest.mark.parametrize("stato", [400, 404, 409, 500])
+def test_crea_categoria_riporta_i_rifiuti_del_plugin(monkeypatch, stato):
+    _finti(monkeypatch, post=_RispostaFinta({"message": "esiste gia'"}, stato))
+    assert crea_categoria_prodotti("X") == {"errore": "esiste gia'"}

@@ -40,6 +40,7 @@ async def test_list_tools():
             "leggi_seo_varianti",
             "aggiorna_seo_varianti",
             "lista_categorie_prodotti",
+            "crea_categoria_prodotti",
             "sposta_categoria_prodotti",
             "pubblica_prodotti",
             "aggiorna_seo_categoria",
