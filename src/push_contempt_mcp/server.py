@@ -393,8 +393,9 @@ def analizza_link_prodotti(stato: str = "publish", solo_senza_link_in_uscita: bo
 def leggi_alt_immagini_prodotto(prodotto_id: int) -> dict:
     """Testo ALT dell'immagine in evidenza e della galleria di un prodotto
     (con id allegato, ruolo, nome file e URL), piu' la parola chiave focus Yoast:
-    l'ALT di norma la contiene. Gli `allegato_id` servono ad
-    aggiorna_alt_immagini_prodotto."""
+    l'ALT di norma la contiene. Ogni immagine ha `problema`: "mancante" (ALT
+    vuoto), "senza_parola_chiave" (c'e' ma non contiene la parola chiave) o null
+    se va bene. Gli `allegato_id` servono ad aggiorna_alt_immagini_prodotto."""
     return alt_tools.leggi_alt_immagini_prodotto(prodotto_id)
 
 
