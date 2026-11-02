@@ -29,6 +29,7 @@ from push_contempt_mcp import (
     product_tools,
     sales_tools,
     seo_tools,
+    seo_varianti_tools,
     text_similarity,
 )
 
@@ -67,7 +68,27 @@ mcp = MCPServer(
         "`percorso_categoria` che restituisce. Un nome di categoria deve esistere una volta "
         "sola nell'albero: se la scansione segnala `problemi_categorie` o `conflitti_categorie`, "
         "o ci sono cartelle in `da_controllare`, NON caricare quei prodotti e riporta il problema "
-        "all'utente cosi' com'e', senza provare a sistemarlo da solo."
+        "all'utente cosi' com'e', senza provare a sistemarlo da solo.\n\n"
+        "SEO DEI PRODOTTI VARIABILI: un variabile ha UNA pagina sola (le varianti non hanno un "
+        "indirizzo proprio: il canonical e' quello del padre), quindi titolo SEO, meta description "
+        "e descrizione sono del PRODOTTO, non di una variante. Parti sempre da leggi_seo_varianti: "
+        "restituisce attributi, varianti e `problemi` ordinati per gravita' (errore, avviso, "
+        "suggerimento) e chiarisce cosa correggere. Regole: (1) i testi del padre parlano del "
+        "prodotto con le sue varianti e citano in modo naturale i valori che esistono davvero "
+        "(colori, taglie, memorie); mai un valore non presente nelle varianti. (2) titolo SEO e "
+        "parola chiave focus NON citano una sola variante (es. 'Felpa nera') quando ce ne sono "
+        "altre: e' il problema `titolo_seo_con_una_variante`. (3) nessun prezzo scritto nei testi: "
+        "cambia, e il testo resterebbe sbagliato; l'intervallo lo mostra la scheda. (4) "
+        "aggiorna_seo_varianti per la descrizione di una variante solo quando aggiunge "
+        "un'informazione vera (colore, taglia, differenza); mai SKU inventati, solo quelli che "
+        "l'utente dà o che sono gia' nel suo catalogo. (5) ALT delle immagini di una variante: "
+        "descrivono quella variante (es. 'Felpa in cotone nera') e contengono la parola chiave; "
+        "si leggono e scrivono con leggi_alt_immagini_prodotto / aggiorna_alt_immagini_prodotto "
+        "(ruolo 'variante'). (6) i dati strutturati (una voce per variante con prezzo, "
+        "disponibilita', colore, taglia) li genera il plugin da solo: non esiste un tool, non "
+        "scriverli tu nella descrizione. I problemi `variante_senza_prezzo`, "
+        "`variante_qualsiasi` e `combinazione_duplicata` non si correggono da qui: sono errori di "
+        "catalogo da sistemare in wp-admin, riportali all'utente."
     ),
 )
 
@@ -219,6 +240,10 @@ def crea_prodotto_variabile(
 
     `percorso_categoria`: come per crea_prodotto (vedi la' per le regole sulle categorie).
 
+    `avvisi_seo` segnala anche i testi che non vanno bene per un variabile: valori delle
+    varianti che la descrizione non cita, titolo SEO o parola chiave focus che nominano
+    una sola variante (vedi le regole sui prodotti variabili). Correggili prima di creare.
+
     Prezzi e scorte per singola variante, e le foto per variante, si cambiano dopo da
     wp-admin: questo tool non li gestisce.
     """
@@ -367,7 +392,8 @@ def leggi_seo_prodotto(prodotto_id: int) -> dict:
     parola chiave focus), più titolo/descrizione/tipo/prezzo come contesto per
     scrivere i nuovi testi. Per un prodotto variabile o raggruppato `prezzo` e'
     null e il prezzo e' l'intervallo `prezzo_min`-`prezzo_max` (stessi campi di
-    lista_prodotti).
+    lista_prodotti). Se `tipo` e' "variable" usa anche leggi_seo_varianti: ha le
+    varianti e i problemi SEO specifici (vedi le regole sui prodotti variabili).
     """
     return seo_tools.leggi_seo_prodotto(prodotto_id)
 
@@ -497,7 +523,8 @@ def analizza_link_prodotti(stato: str = "publish", solo_senza_link_in_uscita: bo
 def leggi_alt_immagini_prodotto(prodotto_id: int) -> dict:
     """Testo ALT dell'immagine in evidenza e della galleria di un prodotto
     (con id allegato, ruolo, nome file e URL), piu' la parola chiave focus Yoast:
-    l'ALT di norma la contiene. Ogni immagine ha `problema`: "mancante" (ALT
+    l'ALT di norma la contiene. In un prodotto variabile ci sono anche le immagini
+    delle varianti, con `ruolo` "variante". Ogni immagine ha `problema`: "mancante" (ALT
     vuoto), "senza_parola_chiave" (c'e' ma non contiene la parola chiave) o null
     se va bene. Gli `allegato_id` servono ad aggiorna_alt_immagini_prodotto."""
     return alt_tools.leggi_alt_immagini_prodotto(prodotto_id)
@@ -514,6 +541,48 @@ def aggiorna_alt_immagini_prodotto(prodotto_id: int, immagini: list[dict]) -> di
     """
     risultato = alt_tools.aggiorna_alt_immagini_prodotto(prodotto_id, immagini)
     if "errore" in risultato:
+        return risultato
+    return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def leggi_seo_varianti(prodotto_id: int) -> dict:
+    """SEO delle varianti di un prodotto VARIABILE: `attributi` (nome, valori,
+    se si vedono nella scheda), `varianti` (id, etichetta, attributi, prezzo, SKU,
+    descrizione, immagine propria e suo ALT, stato), titolo SEO / meta description /
+    parola chiave focus del padre e l'intervallo di prezzo. `problemi` elenca cosa
+    non va, dal piu' grave: ogni voce ha `codice`, `gravita` (errore, avviso,
+    suggerimento), `messaggio` e le `varianti` coinvolte (id).
+
+    Codici: nessuna_variante_in_vendita, variante_senza_prezzo, combinazione_duplicata
+    (errori: da correggere in wp-admin, non da qui); variante_qualsiasi,
+    attributo_nascosto, titolo_seo_con_una_variante, varianti_senza_immagine_propria
+    (avvisi); parola_chiave_con_una_variante, valori_non_nel_testo, varianti_senza_sku
+    (suggerimenti). Per un prodotto non variabile torna un errore: usa leggi_seo_prodotto.
+    Leggi sempre questo prima di scrivere i testi di un variabile (vedi le regole sui
+    prodotti variabili nelle istruzioni del server).
+    """
+    return seo_varianti_tools.leggi_seo_varianti(prodotto_id)
+
+
+@mcp.tool()
+def aggiorna_seo_varianti(
+    prodotto_id: int, varianti: list[dict], solo_anteprima: bool = False
+) -> dict:
+    """Riscrive la descrizione e/o lo SKU delle varianti di un prodotto variabile.
+    `varianti` e' una lista di `{"id": 143, "descrizione": "testo", "sku": "FEL-NM"}`
+    (id da leggi_seo_varianti; `descrizione` e `sku` facoltativi, almeno uno; le
+    varianti non indicate restano com'e'). La descrizione di una variante compare
+    nella scheda quando il cliente la sceglie e nei dati strutturati: scrivila solo
+    se aggiunge un'informazione vera. SKU vuoto lo toglie; non inventare SKU.
+    Se una variante non e' del prodotto o uno SKU e' gia' di un altro prodotto non si
+    scrive niente. Con `solo_anteprima=True` non salva e mostra solo prima/dopo.
+    Restituisce `descrizione_prima/dopo` e `sku_prima/dopo` per ogni variante.
+    Invalida anche la cache del sito. Per gli ALT delle immagini delle varianti usa
+    aggiorna_alt_immagini_prodotto; per i testi del padre aggiorna_seo_prodotto.
+    """
+    risultato = seo_varianti_tools.aggiorna_seo_varianti(prodotto_id, varianti, solo_anteprima)
+    if "errore" in risultato or solo_anteprima:
         return risultato
     return {**risultato, **cache_tools.purga_cache()}
 

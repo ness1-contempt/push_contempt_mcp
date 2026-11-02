@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from push_contempt_mcp import seo_tools, varianti
+from push_contempt_mcp import seo_tools, seo_varianti_tools, varianti
 
 load_dotenv()
 
@@ -254,6 +254,8 @@ def crea_prodotto_variabile(
             risultato["immagini"] = len(percorsi_immagini)
             risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(
                 descrizione, frase_chiave_focus
+            ) + seo_varianti_tools.valida_testi_variabile(
+                descrizione, titolo_seo, frase_chiave_focus, elenco
             )
             risultato["prossimo_passo"] = (
                 "Nessun prodotto creato. Mostra all'utente queste varianti. "
@@ -271,7 +273,11 @@ def crea_prodotto_variabile(
         corpo["immagine_evidenza_id"] = attachment_ids[0]
     risultato = _invia_creazione(corpo)
     if "errore" not in risultato:
-        risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
+        risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(
+            descrizione, frase_chiave_focus
+        ) + seo_varianti_tools.valida_testi_variabile(
+            descrizione, titolo_seo, frase_chiave_focus, elenco
+        )
     return risultato
 
 

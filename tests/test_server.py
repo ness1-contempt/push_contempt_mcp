@@ -37,6 +37,8 @@ async def test_list_tools():
             "analizza_link_prodotti",
             "leggi_alt_immagini_prodotto",
             "aggiorna_alt_immagini_prodotto",
+            "leggi_seo_varianti",
+            "aggiorna_seo_varianti",
             "aggiorna_seo_categoria",
             "leggi_analisi_seo_yoast",
             "analizza_seo_sito",
