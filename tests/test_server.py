@@ -13,6 +13,7 @@ async def test_list_tools():
             "saluta",
             "lista_prodotti",
             "crea_prodotto",
+            "crea_prodotto_variabile",
             "prepara_modifica_prezzo_prodotto",
             "conferma_modifica_in_corso",
             "annulla_modifica_in_corso",

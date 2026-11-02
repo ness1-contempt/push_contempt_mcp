@@ -83,7 +83,31 @@ pagina Releases.
   resta da rivedere e pubblicare da wp-admin. La risposta include
   `avvisi_seo` (densità frase chiave, sottotitoli H2/H3, link interni) da
   controllare prima di considerare il prodotto pronto.
+- `crea_prodotto_variabile` — come `crea_prodotto` ma per un prodotto **con varianti**
+  (colori, memoria, taglie): una variante per ogni combinazione degli attributi, tutte
+  allo stesso prezzo e senza scorte, sempre in bozza. Parte dall'**anteprima**
+  (`anteprima=True`, predefinita): non scrive niente, nemmeno immagini o categoria, e
+  mostra le varianti che nascerebbero. Solo con `anteprima=False` crea davvero. Due modi
+  per dare gli attributi, vedi sotto.
 - `prodotti_in_bozza` — elenco dei prodotti creati e non ancora pubblicati.
+
+**Prodotti variabili: i due modi**
+- **Preciso** (`riga_varianti`): nel file di testo del prodotto una riga sola che comincia
+  con `varianti:`, con gli attributi separati da `|` e i valori da virgola:
+  `varianti: Colore: Nero, Bianco | Memoria: 256 GB, 512 GB` (4 varianti). La legge il
+  server senza interpretarla (`scansiona_cartella_prodotti` la restituisce già letta in
+  `varianti`); se è scritta male dà un errore chiaro. I nomi e i valori non possono
+  contenere `|` né virgole.
+- **Automatico** (`attributi`): se la riga non c'è, l'assistente ricava gli attributi dal testo
+  libero. È comodo ma **può sbagliare**: leggere male un valore, inventarne uno, scambiare una
+  frase descrittiva per una variante. Per questo l'assistente deve usare solo valori scritti
+  davvero, chiedere se il testo è ambiguo e **mostrarti l'anteprima aspettando il tuo ok** prima
+  di creare. Controllala sempre.
+- Regole comuni, controllate dal plugin prima di scrivere: al massimo 4 attributi e 50 varianti,
+  niente valori doppi o vuoti, prezzo numerico maggiore di zero con il punto come decimale. Se
+  qualcosa fallisce a metà, il plugin toglie quello che aveva già creato.
+- Prezzi o scorte diversi per variante e foto per variante non sono gestiti: si cambiano dopo
+  da wp-admin.
 
 **Prezzi**
 - `calcola_aggiornamento_prezzi` / `applica_aggiornamento_prezzi` —

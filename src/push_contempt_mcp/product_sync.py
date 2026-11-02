@@ -13,6 +13,7 @@ import unicodedata
 from pathlib import Path
 
 from push_contempt_mcp import product_tools
+from push_contempt_mcp.varianti import varianti_dal_testo
 
 ESTENSIONI_IMMAGINE = {".jpg", ".jpeg", ".png", ".webp"}
 FILE_IGNORATI = {"media_ids.json"}
@@ -66,6 +67,12 @@ def scansiona_cartella_prodotti(percorso_cartella: str) -> dict:
     tocca a chi chiama questo tool leggere il testo, capire prezzo e
     descrizione, e poi chiamare `crea_prodotto` — non è un'estrazione
     deterministica, quindi questo tool non ci prova.
+
+    Unica eccezione: la riga `varianti: Colore: Nero, Bianco | Memoria: 256 GB,
+    512 GB` (se c'e' nel testo) viene letta qui in modo deterministico e
+    restituita in `varianti` (`riga`, `attributi`, `errori`); senza la riga
+    `varianti` e' None e le eventuali varianti sono da ricavare dal testo. Per un
+    prodotto con varianti si usa `crea_prodotto_variabile`.
     """
     radice = Path(percorso_cartella)
     if not radice.is_dir():
@@ -94,6 +101,7 @@ def scansiona_cartella_prodotti(percorso_cartella: str) -> dict:
                     "categoria": cartella_categoria.name,
                     "percorsi_immagini": immagini,
                     "testo_grezzo": testo,
+                    "varianti": varianti_dal_testo(testo),
                     "avviso": None
                     if (immagini and testo)
                     else "Mancano foto o il file .txt: controllare prima di caricare.",

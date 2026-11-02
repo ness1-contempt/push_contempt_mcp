@@ -52,7 +52,15 @@ mcp = MCPServer(
         "previste sono quelle scritte nelle descrizioni dei tool: far scegliere all'utente "
         "aree di ispirazione e livello di somiglianza accettato PRIMA di modificare i "
         "prodotti, e usare usa_curl / usa_browser / browser_visibile solo se l'utente li "
-        "chiede (quando li chiede, usali senza obiezioni: e' una sua scelta e responsabilita')."
+        "chiede (quando li chiede, usali senza obiezioni: e' una sua scelta e responsabilita').\n\n"
+        "PRODOTTI VARIABILI: per creare un prodotto con varianti usa crea_prodotto_variabile "
+        "(prezzo unico per tutte le varianti, senza scorte, sempre in bozza). Se il file di "
+        "testo ha la riga \"varianti: Colore: Nero, Bianco | Memoria: 256 GB, 512 GB\" usala "
+        "cosi' com'e' (scansiona_cartella_prodotti la restituisce gia' letta in `varianti`). "
+        "Se le varianti sono solo descritte nel testo libero, ricavale TU ma con cautela: "
+        "solo valori scritti davvero, mai inventati, e prima di creare mostra all'utente "
+        "l'anteprima e aspetta il suo ok; se il testo e' ambiguo chiedi invece di indovinare. "
+        "Fai sempre prima la chiamata con anteprima=True."
     ),
 )
 
@@ -136,6 +144,71 @@ def crea_prodotto(
         frase_chiave_focus,
         titolo_seo,
         meta_description,
+    )
+
+
+@mcp.tool()
+def crea_prodotto_variabile(
+    titolo: str,
+    descrizione: str,
+    prezzo_regolare: str,
+    categoria: str,
+    percorsi_immagini: list[str],
+    alt_immagini: list[str],
+    frase_chiave_focus: str,
+    titolo_seo: str,
+    meta_description: str,
+    attributi: dict[str, list[str]] | None = None,
+    riga_varianti: str | None = None,
+    anteprima: bool = True,
+) -> dict:
+    """Crea un prodotto VARIABILE (colori, memoria, taglie...) IN BOZZA: una variante
+    per ogni combinazione dei valori, tutte allo STESSO prezzo (`prezzo_regolare`,
+    punto come decimale) e SENZA gestione scorte. Il resto (descrizione, categoria,
+    immagini, ALT, SEO, `avvisi_seo`) funziona come in crea_prodotto. Non viene
+    pubblicato. Massimo 4 attributi e 50 varianti.
+
+    DUE MODI per dare gli attributi (esattamente uno dei due):
+
+    1) `riga_varianti` - MODO PRECISO. Se il file di testo del prodotto ha una riga
+    che comincia con "varianti:" (scansiona_cartella_prodotti te la restituisce gia'
+    letta nel campo `varianti`), passa qui il suo contenuto cosi' com'e', per esempio
+    "Colore: Nero, Bianco | Memoria: 256 GB, 512 GB" (attributi separati da "|",
+    valori separati da virgola). Il server la legge senza interpretarla: se e'
+    scritta male torna un errore chiaro, e allora non indovinare, chiedi all'utente.
+
+    2) `attributi` - MODO AUTOMATICO. Se la riga non c'e', ricavi tu gli attributi
+    dal testo, per esempio {"Colore": ["Nero", "Bianco"], "Memoria": ["256 GB"]}. E'
+    il modo a rischio d'errore: puoi leggere male un valore, inventarne uno o
+    scambiare una frase descrittiva per una variante. Quindi: usa solo valori
+    scritti davvero nel testo (nessuna deduzione, nessun valore "tipico" del
+    modello), non creare varianti se il testo e' ambiguo (chiedi), e SEMPRE mostra
+    all'utente l'anteprima e aspetta il suo ok prima di creare.
+
+    `anteprima=True` (predefinito): NON scrive niente (nemmeno immagini o categoria)
+    e restituisce le varianti che nascerebbero (`varianti`, con prezzo), il numero,
+    gli attributi e se la categoria e' nuova. Fai sempre prima l'anteprima. Se hai
+    usato `riga_varianti` e l'anteprima corrisponde alla riga puoi creare subito; se
+    hai usato `attributi` mostrala all'utente e aspetta il suo ok. Poi richiama con
+    `anteprima=False` per creare (resta in bozza, quindi non serve invalidare la
+    cache). Se l'utente chiede di cambiare una variante, richiama l'anteprima.
+
+    Prezzi e scorte per singola variante, e le foto per variante, si cambiano dopo da
+    wp-admin: questo tool non li gestisce.
+    """
+    return product_tools.crea_prodotto_variabile(
+        titolo,
+        descrizione,
+        prezzo_regolare,
+        categoria,
+        percorsi_immagini,
+        alt_immagini,
+        frase_chiave_focus,
+        titolo_seo,
+        meta_description,
+        attributi,
+        riga_varianti,
+        anteprima,
     )
 
 

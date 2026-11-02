@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from push_contempt_mcp import seo_tools
+from push_contempt_mcp import seo_tools, varianti
 
 load_dotenv()
 
@@ -76,19 +76,9 @@ def crea_prodotto(
             "un ALT per ogni immagine, stesso ordine."
         )
 
-    try:
-        attachment_ids = [_carica_immagine(percorso) for percorso in percorsi_immagini]
-    except FileNotFoundError as errore:
-        return {
-            "errore": f"Immagine non trovata: {errore.filename}. I percorsi vanno indicati "
-            "come sono sul computer dove gira il server MCP.",
-            "creato": False,
-        }
-    except requests.RequestException as errore:
-        return {
-            "errore": f"Caricamento di un'immagine non riuscito: {_dettaglio(errore)}",
-            "creato": False,
-        }
+    attachment_ids, errore = _carica_immagini(percorsi_immagini)
+    if errore:
+        return errore
 
     corpo = {
         "titolo": titolo,
@@ -105,6 +95,32 @@ def crea_prodotto(
         # Senza immagini la chiave non va mandata: un null non e' un intero (400 dal plugin).
         corpo["immagine_evidenza_id"] = attachment_ids[0]
 
+    risultato = _invia_creazione(corpo)
+    if "errore" not in risultato:
+        risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
+    return risultato
+
+
+def _carica_immagini(percorsi: list[str]) -> tuple[list[int], dict | None]:
+    """Carica le immagini e restituisce i loro id, oppure un errore leggibile."""
+    try:
+        return [_carica_immagine(percorso) for percorso in percorsi], None
+    except FileNotFoundError as errore:
+        return [], {
+            "errore": f"Immagine non trovata: {errore.filename}. I percorsi vanno indicati "
+            "come sono sul computer dove gira il server MCP.",
+            "creato": False,
+        }
+    except requests.RequestException as errore:
+        return [], {
+            "errore": f"Caricamento di un'immagine non riuscito: {_dettaglio(errore)}",
+            "creato": False,
+        }
+
+
+def _invia_creazione(corpo: dict) -> dict:
+    """Manda la richiesta di creazione al plugin: la risposta, o un errore con il
+    messaggio vero di WordPress invece di un'eccezione generica."""
     site = os.environ["WP_SITE_URL"]
     try:
         risposta = requests.post(
@@ -112,7 +128,7 @@ def crea_prodotto(
             json=corpo,
             auth=_auth(),
             verify=False,
-            timeout=30,
+            timeout=60,
         )
         risposta.raise_for_status()
     except requests.RequestException as errore:
@@ -120,9 +136,7 @@ def crea_prodotto(
             "errore": f"Creazione del prodotto non riuscita: {_dettaglio(errore)}",
             "creato": False,
         }
-    risultato = risposta.json()
-    risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
-    return risultato
+    return risposta.json()
 
 
 def _dettaglio(errore: requests.RequestException) -> str:
@@ -135,6 +149,105 @@ def _dettaglio(errore: requests.RequestException) -> str:
     except ValueError:
         messaggio = risposta.text
     return f"HTTP {risposta.status_code}: {messaggio}"
+
+
+def crea_prodotto_variabile(
+    titolo: str,
+    descrizione: str,
+    prezzo_regolare: str,
+    categoria: str,
+    percorsi_immagini: list[str],
+    alt_immagini: list[str],
+    frase_chiave_focus: str,
+    titolo_seo: str,
+    meta_description: str,
+    attributi: dict[str, list[str]] | None = None,
+    riga_varianti: str | None = None,
+    anteprima: bool = True,
+) -> dict:
+    """Crea un prodotto WooCommerce VARIABILE in bozza, con una variante per ogni
+    combinazione dei valori degli attributi, tutte allo stesso `prezzo_regolare`
+    e senza gestione scorte. Gli attributi arrivano in uno di due modi (esattamente
+    uno): `riga_varianti`, la riga del file di testo letta cosi' com'e', oppure
+    `attributi`, un dizionario nome -> valori ricavato dall'assistente.
+
+    Con `anteprima=True` (predefinito) NON si scrive niente, nemmeno immagini o
+    categoria: si restituisce l'elenco delle varianti che nascerebbero. Con
+    `anteprima=False` si crea davvero.
+    """
+    if (attributi is None) == (riga_varianti is None):
+        return {
+            "errore": "Indica gli attributi in uno solo dei due modi: "
+            "`attributi` oppure `riga_varianti`.",
+            "creato": False,
+        }
+    if len(alt_immagini) != len(percorsi_immagini):
+        return {
+            "errore": f"alt_immagini ({len(alt_immagini)} elementi) deve avere la stessa lunghezza "
+            f"di percorsi_immagini ({len(percorsi_immagini)} elementi).",
+            "creato": False,
+        }
+
+    if riga_varianti is not None:
+        letti = varianti.analizza_riga_varianti(riga_varianti)
+        if letti["errori"]:
+            return {
+                "errore": "La riga delle varianti non e' scritta nel formato previsto: "
+                + " ".join(letti["errori"]),
+                "formato": "varianti: Colore: Nero, Bianco | Memoria: 256 GB, 512 GB",
+                "creato": False,
+            }
+        elenco = letti["attributi"]
+        modalita = "riga"
+    else:
+        elenco = [{"nome": nome, "valori": valori} for nome, valori in attributi.items()]
+        modalita = "attributi"
+
+    corpo = {
+        "tipo": "variable",
+        "titolo": titolo,
+        "descrizione": descrizione,
+        "prezzo_regolare": prezzo_regolare,
+        "categoria": categoria,
+        "attributi": elenco,
+        "titolo_seo": titolo_seo,
+        "meta_description": meta_description,
+        "parola_chiave_focus": frase_chiave_focus,
+    }
+
+    if anteprima:
+        mancanti = [percorso for percorso in percorsi_immagini if not Path(percorso).is_file()]
+        if mancanti:
+            return {
+                "errore": f"Immagine non trovata: {mancanti[0]}. I percorsi vanno indicati "
+                "come sono sul computer dove gira il server MCP.",
+                "creato": False,
+            }
+        risultato = _invia_creazione({**corpo, "solo_anteprima": True})
+        if "errore" not in risultato:
+            risultato["modalita"] = modalita
+            risultato["immagini"] = len(percorsi_immagini)
+            risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(
+                descrizione, frase_chiave_focus
+            )
+            risultato["prossimo_passo"] = (
+                "Nessun prodotto creato. Mostra all'utente queste varianti. "
+                "Se le hai ricavate tu dal testo, aspetta il suo ok; "
+                "poi richiama con anteprima=False."
+            )
+        return risultato
+
+    attachment_ids, errore = _carica_immagini(percorsi_immagini)
+    if errore:
+        return errore
+    corpo["galleria_ids"] = attachment_ids[1:]
+    corpo["alt_immagini"] = dict(zip(attachment_ids, alt_immagini, strict=True))
+    if attachment_ids:
+        corpo["immagine_evidenza_id"] = attachment_ids[0]
+    risultato = _invia_creazione(corpo)
+    if "errore" not in risultato:
+        risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
+    return risultato
 
 
 def prodotti_in_bozza() -> list[dict]:
