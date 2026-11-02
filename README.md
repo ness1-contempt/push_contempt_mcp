@@ -97,6 +97,16 @@ Copia `.env.example` in `.env` e compila:
   (la versione sostituita dall'ultima scrittura); la versione lasciata diventa il precedente,
   quindi si può tornare indietro. I prodotti mai modificati non si toccano. Ridefinire la base
   non è un tool: lo fa solo l'utente dalla tab SEO.
+- `leggi_descrizione_prodotto` / `aggiorna_descrizione_prodotto` — descrizione lunga e
+  breve di un prodotto (HTML filtrato come in un articolo WordPress). Restituisce
+  prima/dopo; il plugin tiene base e precedente come per la SEO.
+- `ripristina_descrizione_prodotti` — rimette descrizione e descrizione breve come nella
+  **base** o nel **precedente**; la versione lasciata diventa il precedente. I prodotti mai
+  modificati con questi tool non si toccano.
+- `leggi_alt_immagini_prodotto` / `aggiorna_alt_immagini_prodotto` — testo ALT
+  dell'immagine in evidenza e della galleria, con la parola chiave focus Yoast a
+  portata di mano. In scrittura si indicano gli `allegato_id` da cambiare; gli
+  allegati che non sono del prodotto vengono rifiutati.
 - `aggiorna_seo_categoria` — stessa cosa per le categorie prodotto
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).

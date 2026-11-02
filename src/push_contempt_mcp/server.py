@@ -15,10 +15,12 @@ from datetime import datetime
 from mcp.server.mcpserver import MCPServer
 
 from push_contempt_mcp import (
+    alt_tools,
     browser_tools,
     cache_tools,
     catalog_health,
     competitor_seo,
+    descrizione_tools,
     inventory_tools,
     order_tools,
     pricing_tools,
@@ -296,6 +298,78 @@ def ripristina_seo_prodotti(prodotto_ids: list[int], versione: str = "base") -> 
     if "errore" in risultato:
         return risultato
     return {"esiti": risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def leggi_descrizione_prodotto(prodotto_id: int) -> dict:
+    """Descrizione lunga e breve attuali di un prodotto (HTML), con le versioni
+    base e precedente conservate dal plugin (null se non e' mai stata modificata
+    con aggiorna_descrizione_prodotto)."""
+    return descrizione_tools.leggi_descrizione_prodotto(prodotto_id)
+
+
+@mcp.tool()
+def aggiorna_descrizione_prodotto(
+    prodotto_id: int,
+    descrizione_html: str,
+    descrizione_breve: str | None = None,
+    origine: str = "",
+) -> dict:
+    """Scrive la descrizione di un prodotto (HTML, filtrato come in un articolo
+    WordPress: niente script) e, se data, anche la descrizione breve; se
+    `descrizione_breve` manca resta quella attuale. Sovrascrive i testi
+    esistenti e restituisce prima/dopo per controllo, perche' l'effetto e'
+    pubblico. Invalida anche la cache del sito. Il plugin tiene la base (stato
+    prima del primo intervento) e il precedente: si rimettono con
+    ripristina_descrizione_prodotti. `origine` (facoltativa) dice chi ha scritto.
+    """
+    risultato = descrizione_tools.aggiorna_descrizione_prodotto(
+        prodotto_id, descrizione_html, descrizione_breve, origine
+    )
+    if "errore" in risultato:
+        return risultato
+    return {**risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def ripristina_descrizione_prodotti(prodotto_ids: list[int], versione: str = "base") -> dict:
+    """Rimette descrizione e descrizione breve di uno o piu' prodotti come in una
+    delle versioni conservate dal plugin: "base" (lo stato prima del primo
+    intervento) o "precedente" (quella sostituita dall'ultima scrittura). La
+    versione che si lascia diventa il "precedente", quindi si puo' sempre
+    tornare indietro. Un prodotto mai modificato con aggiorna_descrizione_prodotto
+    non viene toccato. Esiti per id: "ripristinato", "gia_in_uso",
+    "nessuno_snapshot" o "non_trovato". Invalida anche la cache del sito. Usalo
+    solo su richiesta dell'utente: sovrascrive i testi attuali.
+    """
+    risultato = descrizione_tools.ripristina_descrizione_prodotti(prodotto_ids, versione)
+    if "errore" in risultato:
+        return risultato
+    return {"esiti": risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def leggi_alt_immagini_prodotto(prodotto_id: int) -> dict:
+    """Testo ALT dell'immagine in evidenza e della galleria di un prodotto
+    (con id allegato, ruolo, nome file e URL), piu' la parola chiave focus Yoast:
+    l'ALT di norma la contiene. Gli `allegato_id` servono ad
+    aggiorna_alt_immagini_prodotto."""
+    return alt_tools.leggi_alt_immagini_prodotto(prodotto_id)
+
+
+@mcp.tool()
+def aggiorna_alt_immagini_prodotto(prodotto_id: int, immagini: list[dict]) -> dict:
+    """Riscrive l'ALT delle immagini di un prodotto. `immagini` e' una lista di
+    `{"allegato_id": 62, "alt": "testo"}` (gli id vengono da
+    leggi_alt_immagini_prodotto); le immagini non indicate restano com'e'. ALT
+    vuoto = lo toglie. Se un allegato non appartiene al prodotto non si scrive
+    niente. Restituisce ALT prima/dopo per ogni immagine. Invalida anche la
+    cache del sito.
+    """
+    risultato = alt_tools.aggiorna_alt_immagini_prodotto(prodotto_id, immagini)
+    if "errore" in risultato:
+        return risultato
+    return {**risultato, **cache_tools.purga_cache()}
 
 
 @mcp.tool()
