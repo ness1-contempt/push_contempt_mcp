@@ -589,7 +589,7 @@ wheels = [
 
 [[package]]
 name = "push-contempt-mcp"
-version = "0.1.16"
+version = "0.1.17"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
