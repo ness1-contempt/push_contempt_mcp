@@ -276,20 +276,30 @@ def _avvia_playwright(visibile: bool = False):
     from playwright.sync_api import sync_playwright
 
     avvio = sync_playwright().start()
-    browser = avvio.chromium.launch(headless=not visibile)
-    pagina = browser.new_page()
-    pagina.route(
-        "**/*",
-        lambda route: (
-            route.abort()
-            if route.request.resource_type in ("image", "media", "font")
-            else route.continue_()
-        ),
-    )
+    browser = None
 
     def chiudi():
-        browser.close()
-        avvio.stop()
+        # Ogni passo protetto: un errore nel primo non deve lasciare aperto il secondo.
+        try:
+            if browser is not None:
+                browser.close()
+        finally:
+            avvio.stop()
+
+    try:
+        browser = avvio.chromium.launch(headless=not visibile)
+        pagina = browser.new_page()
+        pagina.route(
+            "**/*",
+            lambda route: (
+                route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_()
+            ),
+        )
+    except BaseException:
+        chiudi()  # se l'avvio fallisce a meta' non resta ne' il browser ne' il driver
+        raise
 
     return chiudi, pagina
 
@@ -493,9 +503,7 @@ class _Estrattore(HTMLParser):
 
     def _nel_contenuto(self) -> bool:
         return (
-            not self._in_head
-            and not self._profondita_ignorata
-            and self._contenitore_debug is None
+            not self._in_head and not self._profondita_ignorata and self._contenitore_debug is None
         )
 
     def handle_starttag(self, tag, attrs):

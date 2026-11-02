@@ -99,7 +99,9 @@ def prepara_modifica_prezzo_prodotto(prodotto_id: int, nuovo_prezzo_regolare: st
 
     Operazione sensibile: usa il browser (non il DB diretto) così l'utente
     puo' controllare lo screenshot prima che la modifica diventi effettiva.
-    Dopo questo tool chiama conferma_modifica_in_corso oppure annulla_modifica_in_corso.
+    Il browser viene CHIUSO prima di tornare: la modifica resta ricordata (30
+    minuti). Dopo questo tool chiama conferma_modifica_in_corso oppure
+    annulla_modifica_in_corso.
     """
     return browser_tools.prepara_modifica_prezzo_prodotto(prodotto_id, nuovo_prezzo_regolare)
 
@@ -222,16 +224,20 @@ def prodotti_in_bozza() -> list[dict]:
 
 @mcp.tool()
 def conferma_modifica_in_corso() -> dict:
-    """Salva (click su 'Aggiorna') la modifica lasciata in sospeso da un tool
-    prepara_*, e invalida la cache del sito (altrimenti la modifica non si
-    vedrebbe online)."""
+    """Salva la modifica preparata da un tool prepara_*: riapre il browser,
+    controlla che il prezzo non sia cambiato dopo la preparazione (altrimenti non
+    salva niente e lo dice), clicca 'Aggiorna', CHIUDE il browser e invalida la
+    cache del sito (altrimenti la modifica non si vedrebbe online)."""
     risultato = browser_tools.conferma_modifica_in_corso()
+    if risultato.get("stato") != "salvato":
+        return risultato
     return {**risultato, **cache_tools.purga_cache()}
 
 
 @mcp.tool()
 def annulla_modifica_in_corso() -> dict:
-    """Scarta la modifica in sospeso da un tool prepara_*, senza salvare."""
+    """Scarta la modifica preparata da un tool prepara_*, senza salvare (il browser
+    e' gia' chiuso dopo prepara_*)."""
     return browser_tools.annulla_modifica_in_corso()
 
 

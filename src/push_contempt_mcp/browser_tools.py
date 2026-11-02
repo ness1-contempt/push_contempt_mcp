@@ -5,7 +5,13 @@ che diventi definitiva:
   1. `prepara_*`  compila il form e si FERMA prima del submit, restituendo
      uno screenshot da controllare.
   2. `conferma_modifica_in_corso` / `annulla_modifica_in_corso` eseguono (o
-     scartano) il submit sulla pagina lasciata aperta dal passo 1.
+     scartano) la modifica ricordata dal passo 1.
+
+REGOLA: nessun browser resta aperto dopo l'uso. Ogni tool apre il suo browser
+con `_browser_loggato()` e lo chiude sempre prima di tornare, anche se fallisce.
+Fra "prepara" e "conferma" non c'e' quindi nessuna finestra aperta: "prepara"
+ricorda cosa voleva fare (e il valore di partenza), "conferma" riapre il browser,
+ricontrolla che il valore non sia cambiato nel frattempo e solo allora salva.
 
 Usa Playwright in modalità sincrona: va bene perché il tool MCP è una
 funzione sincrona, eseguita dall'SDK in un thread separato.
@@ -13,7 +19,10 @@ funzione sincrona, eseguita dall'SDK in un thread separato.
 
 import os
 import re
+import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import requests
@@ -36,9 +45,12 @@ STATE_FILE = Path(__file__).resolve().parent.parent.parent / ".auth" / "wp_admin
 # Quanto aspettare che l'utente completi il reCAPTCHA nella finestra del browser.
 ATTESA_RECAPTCHA_MS = 120_000
 
-_playwright = None
-_browser = None
-_page: Page | None = None
+# La modifica di prezzo preparata e non ancora confermata (solo in memoria: niente browser aperto).
+_in_sospeso: dict | None = None
+
+# Dopo questo tempo una modifica preparata e non confermata non vale piu': la pagina
+# potrebbe essere cambiata, si rifa' "prepara".
+VALIDITA_MODIFICA_SECONDI = 30 * 60
 
 _PATTERN_SFIDA_MATEMATICA = re.compile(r"(\d+)\s*([+\-×x*])\s*(\d+)\s*=")
 
@@ -193,35 +205,48 @@ def _assicura_login(page: Page, site: str) -> None:
     _salva_sessione(page.context)
 
 
-def _get_logged_in_page() -> Page:
-    """Riusa la pagina già loggata se c'è (rifacendo il login solo se la sessione
-    e' scaduta), altrimenti avvia browser, ripristina i cookie salvati e logga
-    solo se non bastano."""
-    global _playwright, _browser, _page
-
+@contextmanager
+def _browser_loggato() -> Iterator[Page]:
+    """Apre un browser, ripristina i cookie salvati e logga solo se non bastano;
+    restituisce la pagina e, all'uscita dal blocco `with`, CHIUDE SEMPRE il browser
+    e ferma Playwright, sia che il lavoro riesca sia che fallisca. Nessun tool deve
+    lasciare un browser aperto."""
     site = os.environ["WP_SITE_URL"]
+    avvio = sync_playwright().start()
+    browser = None
+    try:
+        # headless=False: la build Chromium "fallback" che Playwright scarica su
+        # questo host (OS non ufficialmente supportato) calcola male la posizione
+        # di alcuni elementi della sidebar di wp-admin in modalita' headless
+        # ("outside of viewport" anche se visibili); in modalita' headed il
+        # rendering e' corretto e i click nativi funzionano senza trucchi via JS.
+        # Serve anche per il reCAPTCHA: l'utente deve poterlo vedere e spuntare.
+        browser = avvio.chromium.launch(headless=False)
+        context = browser.new_context(
+            ignore_https_errors=True,
+            viewport={"width": 1600, "height": 1200},
+            storage_state=str(STATE_FILE) if STATE_FILE.exists() else None,
+        )
+        page = context.new_page()
+        _assicura_login(page, site)
+        yield page
+    finally:
+        _chiudi_browser(browser, avvio)
 
-    if _page is not None and not _page.is_closed():
-        _assicura_login(_page, site)
-        return _page
 
-    _playwright = _playwright or sync_playwright().start()
-    # headless=False: la build Chromium "fallback" che Playwright scarica su
-    # questo host (OS non ufficialmente supportato) calcola male la posizione
-    # di alcuni elementi della sidebar di wp-admin in modalita' headless
-    # ("outside of viewport" anche se visibili); in modalita' headed il
-    # rendering e' corretto e i click nativi funzionano senza trucchi via JS.
-    # Serve anche per il reCAPTCHA: l'utente deve poterlo vedere e spuntare.
-    _browser = _browser or _playwright.chromium.launch(headless=False)
-    context = _browser.new_context(
-        ignore_https_errors=True,
-        viewport={"width": 1600, "height": 1200},
-        storage_state=str(STATE_FILE) if STATE_FILE.exists() else None,
-    )
-    _page = context.new_page()
-
-    _assicura_login(_page, site)
-    return _page
+def _chiudi_browser(browser, avvio) -> None:
+    """Chiude il browser e ferma Playwright: ogni passo e' protetto, cosi' un errore
+    nel primo non impedisce il secondo."""
+    try:
+        if browser is not None:
+            browser.close()
+    except PlaywrightError:
+        pass  # gia' chiuso o crollato: l'importante e' non lasciarlo aperto
+    finally:
+        try:
+            avvio.stop()
+        except PlaywrightError:
+            pass
 
 
 def _separatore_decimale_woocommerce() -> str:
@@ -271,54 +296,105 @@ def _click_js(page: Page, selector: str) -> None:
     page.eval_on_selector(selector, "el => el.click()")
 
 
+def _apri_prodotto(page: Page, prodotto_id: int) -> None:
+    site = os.environ["WP_SITE_URL"]
+    page.goto(
+        f"{site}/wp-admin/post.php?post={prodotto_id}&action=edit", wait_until="domcontentloaded"
+    )
+    page.wait_for_selector("#_regular_price")
+
+
 def prepara_modifica_prezzo_prodotto(prodotto_id: int, nuovo_prezzo_regolare: str) -> dict:
-    """Apre il prodotto in wp-admin e compila il nuovo prezzo regolare, SENZA salvare.
+    """Apre il prodotto in wp-admin e compila il nuovo prezzo regolare, SENZA salvare,
+    poi CHIUDE il browser.
 
     `nuovo_prezzo_regolare` va scritto con il punto come separatore decimale
     (es. "12.50"); viene tradotto automaticamente nel formato del sito.
 
-    Restituisce uno screenshot da far controllare all'utente. Per rendere
-    effettiva la modifica serve poi chiamare `conferma_modifica_in_corso`.
+    Restituisce uno screenshot da far controllare all'utente e ricorda la
+    modifica. Per rendere effettiva la modifica serve poi chiamare
+    `conferma_modifica_in_corso`: riapre il browser, controlla che il prezzo del
+    prodotto non sia cambiato nel frattempo e salva.
     """
-    site = os.environ["WP_SITE_URL"]
-    page = _get_logged_in_page()
-    url = f"{site}/wp-admin/post.php?post={prodotto_id}&action=edit"
-    page.goto(url, wait_until="domcontentloaded")
-    page.wait_for_selector("#_regular_price")
-    page.fill("#_regular_price", _formatta_prezzo_per_campo(nuovo_prezzo_regolare))
+    global _in_sospeso
+    prezzo_campo = _formatta_prezzo_per_campo(nuovo_prezzo_regolare)
+    with _browser_loggato() as page:
+        _apri_prodotto(page, prodotto_id)
+        prezzo_prima = page.input_value("#_regular_price")
+        page.fill("#_regular_price", prezzo_campo)
+        screenshot = _screenshot(page, f"prezzo-{prodotto_id}-preview")
 
+    _in_sospeso = {
+        "prodotto_id": prodotto_id,
+        "prezzo_campo": prezzo_campo,
+        "prezzo_prima": prezzo_prima,
+        "preparata_alle": time.monotonic(),
+    }
     return {
         "stato": "in_attesa_di_conferma",
         "prodotto_id": prodotto_id,
+        "prezzo_attuale": prezzo_prima,
         "nuovo_prezzo_regolare": nuovo_prezzo_regolare,
-        "screenshot": _screenshot(page, f"prezzo-{prodotto_id}-preview"),
-        "nota": "Form compilato ma NON salvato. Controlla lo screenshot, poi "
-        "chiama conferma_modifica_in_corso per salvare o annulla_modifica_in_corso per scartare.",
+        "screenshot": screenshot,
+        "nota": "Form compilato ma NON salvato, e il browser e' stato chiuso. Controlla lo "
+        "screenshot, poi chiama conferma_modifica_in_corso per salvare (riapre il browser e "
+        "ricontrolla il prezzo) o annulla_modifica_in_corso per scartare.",
     }
+
+
+def _modifica_in_sospeso_valida() -> tuple[dict | None, dict | None]:
+    """(modifica, errore): la modifica preparata se c'e' ed e' ancora valida,
+    altrimenti l'errore da restituire."""
+    global _in_sospeso
+    if _in_sospeso is None:
+        return None, {"stato": "errore", "nota": "Nessuna modifica in sospeso."}
+    if time.monotonic() - _in_sospeso["preparata_alle"] > VALIDITA_MODIFICA_SECONDI:
+        _in_sospeso = None
+        return None, {
+            "stato": "errore",
+            "nota": "La modifica preparata e' scaduta (piu' di 30 minuti): rifai "
+            "prepara_modifica_prezzo_prodotto.",
+        }
+    return _in_sospeso, None
 
 
 def conferma_modifica_in_corso() -> dict:
-    """Clicca 'Aggiorna' sulla pagina prodotto lasciata aperta dal passo 'prepara_*'."""
-    global _page
-    if _page is None or _page.is_closed():
-        return {"stato": "errore", "nota": "Nessuna modifica in sospeso da confermare."}
+    """Salva la modifica di prezzo preparata da `prepara_modifica_prezzo_prodotto`:
+    riapre il browser, ricontrolla che il prezzo del prodotto sia ancora quello di
+    partenza (altrimenti non salva niente), clicca 'Aggiorna' e CHIUDE il browser."""
+    global _in_sospeso
+    modifica, errore = _modifica_in_sospeso_valida()
+    if errore:
+        return errore
 
-    page = _page
-    _click_js(page, "#publish")
-    page.wait_for_selector("#message")
-    return {
-        "stato": "salvato",
-        "screenshot": _screenshot(page, "dopo-salvataggio"),
-    }
+    with _browser_loggato() as page:
+        _apri_prodotto(page, modifica["prodotto_id"])
+        prezzo_ora = page.input_value("#_regular_price")
+        if prezzo_ora != modifica["prezzo_prima"]:
+            _in_sospeso = None
+            return {
+                "stato": "annullato",
+                "prodotto_id": modifica["prodotto_id"],
+                "nota": f"Il prezzo del prodotto e' cambiato dopo la preparazione (era "
+                f"«{modifica['prezzo_prima']}», ora «{prezzo_ora}»): non ho salvato niente. "
+                "Rifai prepara_modifica_prezzo_prodotto.",
+            }
+        page.fill("#_regular_price", modifica["prezzo_campo"])
+        _click_js(page, "#publish")
+        page.wait_for_selector("#message")
+        screenshot = _screenshot(page, "dopo-salvataggio")
+
+    _in_sospeso = None
+    return {"stato": "salvato", "prodotto_id": modifica["prodotto_id"], "screenshot": screenshot}
 
 
 def annulla_modifica_in_corso() -> dict:
-    """Scarta la modifica in sospeso senza salvare (ricarica la pagina)."""
-    global _page
-    if _page is None or _page.is_closed():
+    """Scarta la modifica di prezzo preparata, senza salvare. Non c'e' nessun
+    browser da chiudere: dopo `prepara_*` e' gia' chiuso."""
+    global _in_sospeso
+    if _in_sospeso is None:
         return {"stato": "errore", "nota": "Nessuna modifica in sospeso da annullare."}
-
-    _page.reload()
+    _in_sospeso = None
     return {"stato": "annullato"}
 
 
@@ -344,18 +420,18 @@ def aggiorna_seo_categoria(term_id: int, titolo_seo: str, meta_description: str)
     aggiorna correttamente l'indicizzabile interno di Yoast.
     """
     site = os.environ["WP_SITE_URL"]
-    page = _get_logged_in_page()
     url = f"{site}/wp-admin/term.php?taxonomy=product_cat&tag_ID={term_id}&post_type=product"
-    page.goto(url, wait_until="domcontentloaded")
-    page.wait_for_selector("#name")
-    page.wait_for_timeout(1500)  # il metabox Yoast (React) si monta dopo il DOM ready
+    with _browser_loggato() as page:
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#name")
+        page.wait_for_timeout(1500)  # il metabox Yoast (React) si monta dopo il DOM ready
 
-    _scrivi_campo_draftjs(page, "#yoast-google-preview-title-metabox", titolo_seo)
-    _scrivi_campo_draftjs(page, "#yoast-google-preview-description-metabox", meta_description)
+        _scrivi_campo_draftjs(page, "#yoast-google-preview-title-metabox", titolo_seo)
+        _scrivi_campo_draftjs(page, "#yoast-google-preview-description-metabox", meta_description)
 
-    page.wait_for_timeout(500)
-    page.click("input[type=submit][value='Aggiorna']")
-    page.wait_for_selector("#name")
+        page.wait_for_timeout(500)
+        page.click("input[type=submit][value='Aggiorna']")
+        page.wait_for_selector("#name")
 
     return {
         "stato": "aggiornato",
@@ -407,18 +483,18 @@ def leggi_analisi_seo_yoast(prodotto_id: int) -> dict:
     dettaglio, quindi serve leggerla da li'.
     """
     site = os.environ["WP_SITE_URL"]
-    page = _get_logged_in_page()
     url = f"{site}/wp-admin/post.php?post={prodotto_id}&action=edit"
-    page.goto(url, wait_until="domcontentloaded")
-    page.wait_for_selector("#wpseo-metabox-root")
+    with _browser_loggato() as page:
+        page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector("#wpseo-metabox-root")
 
-    risultati = page.get_by_text("Risultati dell'analisi", exact=False).first
-    page.wait_for_timeout(1500)  # Yoast calcola l'analisi in modo asincrono dopo il mount
-    if not risultati.is_visible():
-        page.get_by_text("Analisi SEO", exact=False).first.click()
-    risultati.wait_for(timeout=15000)
+        risultati = page.get_by_text("Risultati dell'analisi", exact=False).first
+        page.wait_for_timeout(1500)  # Yoast calcola l'analisi in modo asincrono dopo il mount
+        if not risultati.is_visible():
+            page.get_by_text("Analisi SEO", exact=False).first.click()
+        risultati.wait_for(timeout=15000)
 
-    testo = page.inner_text("#wpseo-metabox-root")
+        testo = page.inner_text("#wpseo-metabox-root")
     inizio = testo.find("Risultati dell'analisi")
     fine = testo.find("Aggiungi una frase chiave correlata")
     blocco = testo[inizio : fine if fine != -1 else None]
