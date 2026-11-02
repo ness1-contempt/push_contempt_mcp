@@ -57,6 +57,7 @@ def crea_prodotto(
     frase_chiave_focus: str,
     titolo_seo: str,
     meta_description: str,
+    percorso_categoria: list[str] | None = None,
 ) -> dict:
     """Crea un prodotto WooCommerce in BOZZA (titolo, descrizione, prezzo,
     categoria, immagini), con SEO e ALT immagini gia' impostati: resta solo
@@ -85,6 +86,7 @@ def crea_prodotto(
         "descrizione": descrizione,
         "prezzo_regolare": prezzo_regolare,
         "categoria": categoria,
+        **_percorso(percorso_categoria),
         "galleria_ids": attachment_ids[1:],
         "alt_immagini": dict(zip(attachment_ids, alt_immagini, strict=True)),
         "titolo_seo": titolo_seo,
@@ -99,6 +101,27 @@ def crea_prodotto(
     if "errore" not in risultato:
         risultato["avvisi_seo"] = seo_tools.valida_contenuto_seo(descrizione, frase_chiave_focus)
     return risultato
+
+
+def _percorso(percorso_categoria: list[str] | None) -> dict:
+    """Il percorso di categorie (dalla radice alla categoria del prodotto) da mandare al
+    plugin, oppure niente se non c'e': allora vale la categoria singola di sempre."""
+    return {"percorso_categoria": list(percorso_categoria)} if percorso_categoria else {}
+
+
+def verifica_categorie(percorsi: list[list[str]]) -> dict:
+    """Chiede al plugin cosa farebbe con questi percorsi di categorie rispetto all'albero
+    del sito: per ognuno i livelli (esiste / da_creare / conflitto) e gli errori, piu' i nomi
+    che compaiono in punti diversi. Sola lettura: non crea niente."""
+    risposta = requests.post(
+        f"{os.environ['WP_SITE_URL']}/wp-json/push-contempt/v1/categorie/verifica",
+        json={"percorsi": percorsi},
+        auth=_auth(),
+        verify=False,
+        timeout=30,
+    )
+    risposta.raise_for_status()
+    return risposta.json()
 
 
 def _carica_immagini(percorsi: list[str]) -> tuple[list[int], dict | None]:
@@ -164,6 +187,7 @@ def crea_prodotto_variabile(
     attributi: dict[str, list[str]] | None = None,
     riga_varianti: str | None = None,
     anteprima: bool = True,
+    percorso_categoria: list[str] | None = None,
 ) -> dict:
     """Crea un prodotto WooCommerce VARIABILE in bozza, con una variante per ogni
     combinazione dei valori degli attributi, tutte allo stesso `prezzo_regolare`
@@ -210,6 +234,7 @@ def crea_prodotto_variabile(
         "prezzo_regolare": prezzo_regolare,
         "categoria": categoria,
         "attributi": elenco,
+        **_percorso(percorso_categoria),
         "titolo_seo": titolo_seo,
         "meta_description": meta_description,
         "parola_chiave_focus": frase_chiave_focus,

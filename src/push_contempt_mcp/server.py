@@ -55,12 +55,19 @@ mcp = MCPServer(
         "chiede (quando li chiede, usali senza obiezioni: e' una sua scelta e responsabilita').\n\n"
         "PRODOTTI VARIABILI: per creare un prodotto con varianti usa crea_prodotto_variabile "
         "(prezzo unico per tutte le varianti, senza scorte, sempre in bozza). Se il file di "
-        "testo ha la riga \"varianti: Colore: Nero, Bianco | Memoria: 256 GB, 512 GB\" usala "
+        'testo ha la riga "varianti: Colore: Nero, Bianco | Memoria: 256 GB, 512 GB" usala '
         "cosi' com'e' (scansiona_cartella_prodotti la restituisce gia' letta in `varianti`). "
         "Se le varianti sono solo descritte nel testo libero, ricavale TU ma con cautela: "
         "solo valori scritti davvero, mai inventati, e prima di creare mostra all'utente "
         "l'anteprima e aspetta il suo ok; se il testo e' ambiguo chiedi invece di indovinare. "
-        "Fai sempre prima la chiamata con anteprima=True."
+        "Fai sempre prima la chiamata con anteprima=True.\n\n"
+        "CARTELLA PRODOTTI E CATEGORIE: la struttura delle cartelle rispecchia l'albero delle "
+        "categorie WooCommerce (es. Indumenti/Magliette/<Prodotto>/ con foto e .txt). Usa "
+        "scansiona_cartella_prodotti e passa a crea_prodotto/crea_prodotto_variabile il "
+        "`percorso_categoria` che restituisce. Un nome di categoria deve esistere una volta "
+        "sola nell'albero: se la scansione segnala `problemi_categorie` o `conflitti_categorie`, "
+        "o ci sono cartelle in `da_controllare`, NON caricare quei prodotti e riporta il problema "
+        "all'utente cosi' com'e', senza provare a sistemarlo da solo."
     ),
 )
 
@@ -117,6 +124,7 @@ def crea_prodotto(
     frase_chiave_focus: str,
     titolo_seo: str,
     meta_description: str,
+    percorso_categoria: list[str] | None = None,
 ) -> dict:
     """Crea un nuovo prodotto WooCommerce IN BOZZA (titolo, descrizione, prezzo,
     categoria, immagini), con SEO e ALT immagini gia' impostati in automatico:
@@ -129,6 +137,18 @@ def crea_prodotto(
     pubblicato: resta da rivedere e pubblicare da wp-admin (vedi
     prodotti_in_bozza e la tab "Carica prodotti" del plugin), quindi non
     serve invalidare la cache del sito.
+
+    CATEGORIE: le cartelle dei prodotti rispecchiano l'albero delle categorie di
+    WooCommerce. Passa in `percorso_categoria` l'elenco dei nomi dalla radice alla
+    categoria del prodotto (es. ["Indumenti", "Magliette"]; scansiona_cartella_prodotti
+    te lo restituisce gia' pronto): le categorie che mancano vengono create una dentro
+    l'altra, quelle che ci sono si riusano, e il prodotto va solo nella piu' in basso.
+    Un nome di categoria esiste UNA volta sola in tutto l'albero: se sul sito c'e' gia'
+    una categoria con quel nome in un altro punto (o ce n'e' piu' di una) il plugin
+    risponde con un errore 409 e non crea niente, ne' prodotto ne' categorie: riporta
+    il messaggio all'utente (dice dove sta la categoria e dove la vorrebbe la cartella)
+    e NON aggirarlo creando la categoria altrove. Senza `percorso_categoria` vale la
+    sola `categoria` (cercata per nome, o creata in cima).
 
     Se i testi nascono da un'analisi di un sito concorrente (analizza_seo_sito o
     analizza_pagine_salvate), PRIMA di chiamare questo tool: controllali con
@@ -146,6 +166,7 @@ def crea_prodotto(
         frase_chiave_focus,
         titolo_seo,
         meta_description,
+        percorso_categoria,
     )
 
 
@@ -163,6 +184,7 @@ def crea_prodotto_variabile(
     attributi: dict[str, list[str]] | None = None,
     riga_varianti: str | None = None,
     anteprima: bool = True,
+    percorso_categoria: list[str] | None = None,
 ) -> dict:
     """Crea un prodotto VARIABILE (colori, memoria, taglie...) IN BOZZA: una variante
     per ogni combinazione dei valori, tutte allo STESSO prezzo (`prezzo_regolare`,
@@ -195,6 +217,8 @@ def crea_prodotto_variabile(
     `anteprima=False` per creare (resta in bozza, quindi non serve invalidare la
     cache). Se l'utente chiede di cambiare una variante, richiama l'anteprima.
 
+    `percorso_categoria`: come per crea_prodotto (vedi la' per le regole sulle categorie).
+
     Prezzi e scorte per singola variante, e le foto per variante, si cambiano dopo da
     wp-admin: questo tool non li gestisce.
     """
@@ -211,6 +235,7 @@ def crea_prodotto_variabile(
         attributi,
         riga_varianti,
         anteprima,
+        percorso_categoria,
     )
 
 

@@ -73,11 +73,16 @@ pagina Releases.
   cliente (nome, email, telefono, indirizzi).
 
 **Creazione prodotti**
-- `scansiona_cartella_prodotti` — confronta una cartella locale
-  (`<Categoria>/<Prodotto>/`, foto + `.txt`) con il catalogo, separa i
-  prodotti nuovi da quelli già presenti.
+- `scansiona_cartella_prodotti` — confronta una cartella locale con il catalogo e separa i
+  prodotti nuovi da quelli già presenti. Le cartelle sono lo **specchio dell'albero delle
+  categorie** di WooCommerce, a qualsiasi profondità (fino a 5 livelli): una cartella con foto o
+  un `.txt` è un prodotto, le cartelle sopra di lei sono il suo `percorso_categoria`
+  (`Indumenti/Magliette/Maglietta rossa/` = prodotto «Maglietta rossa» nella categoria Magliette,
+  dentro Indumenti). Confronta i percorsi con le categorie del sito (sola lettura) e restituisce
+  per ogni prodotto `piano_categorie` (per ogni livello: esiste / da_creare / conflitto), più
+  `categorie_da_creare`, `conflitti_categorie` e `da_controllare` (cartelle dubbie).
 - `crea_prodotto` — crea un prodotto WooCommerce **in bozza** (titolo,
-  descrizione, prezzo, categoria, immagini: la prima diventa quella in
+  descrizione, prezzo, categoria o `percorso_categoria`, immagini: la prima diventa quella in
   evidenza, le altre vanno in galleria), con SEO e ALT delle immagini già
   impostati nella stessa chiamata. Non viene mai pubblicato in automatico:
   resta da rivedere e pubblicare da wp-admin. La risposta include
@@ -90,6 +95,20 @@ pagina Releases.
   mostra le varianti che nascerebbero. Solo con `anteprima=False` crea davvero. Due modi
   per dare gli attributi, vedi sotto.
 - `prodotti_in_bozza` — elenco dei prodotti creati e non ancora pubblicati.
+
+**Categorie: l'albero delle cartelle**
+- Con `percorso_categoria` (es. `["Indumenti", "Magliette"]`) le categorie che mancano si creano
+  **una dentro l'altra**, quelle che esistono già si riusano (il confronto ignora maiuscole e
+  spazi) e il prodotto va **solo nella categoria più in basso**: quelle sopra lo mostrano
+  comunque. Senza `percorso_categoria` vale la `categoria` singola di sempre.
+- **Un nome di categoria esiste una volta sola in tutto l'albero.** Se sul sito c'è già una
+  categoria con quel nome in un altro punto (la cartella vuole `Indumenti > Magliette`, il sito ha
+  `Abbigliamento > Magliette`), o ce n'è più di una, o lo stesso nome compare in due rami delle
+  cartelle, **non si crea niente** (né prodotto né categorie): il plugin risponde con un errore 409
+  che dice dove sta la categoria e dove la vorrebbe la cartella, e la scansione lo segnala già in
+  `problemi_categorie`. Va sistemato a mano (spostando la cartella o la categoria), non aggirato.
+- Cartelle dubbie, non caricate e riportate in `da_controllare`: una cartella con foto o testo **e**
+  sottocartelle con altri prodotti, e un prodotto fuori da una cartella di categoria.
 
 **Prodotti variabili: i due modi**
 - **Preciso** (`riga_varianti`): nel file di testo del prodotto una riga sola che comincia
