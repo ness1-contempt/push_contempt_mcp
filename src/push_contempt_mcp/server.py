@@ -22,6 +22,7 @@ from push_contempt_mcp import (
     competitor_seo,
     descrizione_tools,
     inventory_tools,
+    link_tools,
     order_tools,
     pricing_tools,
     product_sync,
@@ -71,9 +72,15 @@ def saluta(nome: str, formale: bool = False) -> str:
 
 @mcp.tool()
 def lista_prodotti(ricerca: str = "", limite: int = 20) -> list[dict]:
-    """Elenca i prodotti WooCommerce via REST (titolo, sku, prezzo, scorte).
+    """Elenca i prodotti WooCommerce via REST (titolo, sku, tipo, prezzo, scorte).
 
     `ricerca` filtra per titolo (sottostringa, case-insensitive); vuoto = tutti.
+
+    `tipo` e' il tipo WooCommerce (simple, variable, grouped, external). Il
+    prezzo di un prodotto semplice e' `prezzo`; un variabile o raggruppato non
+    ha un prezzo solo: `prezzo` e' null e vanno letti `prezzo_min` e
+    `prezzo_max` (le varianti in vendita; `numero_varianti` dice quante ce
+    ne sono). Per ogni tipo `prezzo_min`/`prezzo_max` ci sono sempre.
     """
     return product_tools.elenco_prodotti(ricerca, limite)
 
@@ -247,8 +254,10 @@ def lista_stato_seo_prodotti() -> list[dict]:
 @mcp.tool()
 def leggi_seo_prodotto(prodotto_id: int) -> dict:
     """Stato SEO dettagliato di un prodotto (titolo SEO, meta description,
-    parola chiave focus), più titolo/descrizione/prezzo come contesto per
-    scrivere i nuovi testi.
+    parola chiave focus), più titolo/descrizione/tipo/prezzo come contesto per
+    scrivere i nuovi testi. Per un prodotto variabile o raggruppato `prezzo` e'
+    null e il prezzo e' l'intervallo `prezzo_min`-`prezzo_max` (stessi campi di
+    lista_prodotti).
     """
     return seo_tools.leggi_seo_prodotto(prodotto_id)
 
@@ -346,6 +355,18 @@ def ripristina_descrizione_prodotti(prodotto_ids: list[int], versione: str = "ba
     if "errore" in risultato:
         return risultato
     return {"esiti": risultato, **cache_tools.purga_cache()}
+
+
+@mcp.tool()
+def analizza_link_prodotto(prodotto_id: int) -> dict:
+    """Elenca i link nella descrizione lunga di un prodotto, divisi in interni
+    (verso il sito stesso), esterni (verso altri siti) e altri (ancore, mailto,
+    tel), ciascuno con indirizzo, testo cliccabile e nofollow. Dice anche
+    `ha_link_in_uscita`: e' la verifica che Yoast segnala piu' spesso come
+    mancante. Sola lettura: per aggiungere un link riscrivi la descrizione con
+    aggiorna_descrizione_prodotto.
+    """
+    return link_tools.analizza_link_prodotto(prodotto_id)
 
 
 @mcp.tool()

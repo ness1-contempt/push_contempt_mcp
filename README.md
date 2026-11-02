@@ -7,8 +7,7 @@ maggior parte dei tool sono client sottili della REST API di quel plugin
 (nessun accesso diretto al DB, funziona anche su hosting che blocca
 connessioni MySQL esterne); un numero ridotto di operazioni passa invece
 da automazione browser (Playwright) su wp-admin, quando serve poter
-rivedere una modifica prima che diventi effettiva; la lettura veloce del
-catalogo (`lista_prodotti`) resta su accesso diretto al DB.
+rivedere una modifica prima che diventi effettiva.
 
 Per l'installazione completa (plugin + server + collegamento con
 l'assistente AI, in ordine) vedi [`HOWTO.md`](HOWTO.md).
@@ -24,8 +23,6 @@ Copia `.env.example` in `.env` e compila:
   `push_contempt`. Il plugin la genera in automatico dal tab
   "Impostazioni" (un click, non serve WP-CLI). Le Application Password
   native di WordPress non scadono da sole.
-- `WP_DB_*` — credenziali MySQL dirette, usate solo da `lista_prodotti`
-  (lettura) e dalla scansione della cartella prodotti (confronto nomi).
 - `WP_ADMIN_USER` / `WP_ADMIN_PASSWORD` — credenziali di login wp-admin,
   usate solo dai tool che passano da automazione browser (modifica prezzo
   singolo con anteprima, SEO categoria). Il browser Playwright gira in
@@ -44,8 +41,11 @@ Copia `.env.example` in `.env` e compila:
 ## Tool disponibili
 
 **Catalogo**
-- `lista_prodotti` — ricerca testuale nel catalogo (lettura diretta dal DB:
-  titolo, sku, prezzo, scorte).
+- `lista_prodotti` — ricerca testuale nel catalogo: titolo, sku, scorte, tipo
+  (simple, variable, grouped, external) e prezzo. Un prodotto variabile o
+  raggruppato non ha un prezzo solo: `prezzo` è null e si leggono `prezzo_min` e
+  `prezzo_max` (le varianti in vendita), più `numero_varianti`. Gli stessi campi sono
+  in `leggi_seo_prodotto`.
 - `controllo_salute_catalogo` — prodotti pubblicati ma incompleti (nessuna
   immagine in evidenza, nessuna categoria, prezzo non valido, descrizione
   troppo corta).
@@ -107,6 +107,9 @@ Copia `.env.example` in `.env` e compila:
   dell'immagine in evidenza e della galleria, con la parola chiave focus Yoast a
   portata di mano. In scrittura si indicano gli `allegato_id` da cambiare; gli
   allegati che non sono del prodotto vengono rifiutati.
+- `analizza_link_prodotto` — i link nella descrizione di un prodotto, divisi in interni, esterni
+  e altri (ancore, mailto, tel), con `ha_link_in_uscita`: la verifica che Yoast segnala più
+  spesso come mancante. Sola lettura.
 - `aggiorna_seo_categoria` — stessa cosa per le categorie prodotto
   (tassonomia `product_cat`), via browser: per i termini di tassonomia
   Yoast non rilegge i campi scritti via REST/DB diretto (vedi Note).

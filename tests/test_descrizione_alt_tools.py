@@ -160,3 +160,24 @@ def test_aggiorna_alt_con_elementi_malformati_non_parte(monkeypatch):
     assert "errore" in aggiorna_alt_immagini_prodotto(7, [{"alt": "senza id"}])
     assert "errore" in aggiorna_alt_immagini_prodotto(7, [{"allegato_id": "8", "alt": "x"}])
     assert chiamate == []
+
+
+# --- link ----------------------------------------------------------------------
+
+
+def test_analizza_link_prodotto_chiama_il_plugin(monkeypatch):
+    from push_contempt_mcp.link_tools import analizza_link_prodotto
+
+    dati = {"id": 7, "interni": [], "esterni": [], "ha_link_in_uscita": False}
+    chiamate = _finti(monkeypatch, get=_RispostaFinta(dati))
+
+    assert analizza_link_prodotto(7) == dati
+    assert chiamate == [("GET", f"{BASE}/link/prodotto", {"id": 7})]
+
+
+def test_analizza_link_prodotto_inesistente_da_errore(monkeypatch):
+    from push_contempt_mcp.link_tools import analizza_link_prodotto
+
+    _finti(monkeypatch, get=_RispostaFinta({"message": "Nessun prodotto con id 9"}, 404))
+
+    assert analizza_link_prodotto(9) == {"errore": "Nessun prodotto con id 9"}

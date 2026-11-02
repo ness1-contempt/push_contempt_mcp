@@ -81,8 +81,7 @@ Copia `.env.example` in `.env`:
 - macOS / Linux: `cp .env.example .env`
 
 Apri `.env` e incolla i tre valori del passo 2 (`WP_SITE_URL`,
-`WP_APP_USER`, `WP_APP_PASSWORD`). Gli altri campi (`WP_DB_*`,
-`WP_ADMIN_*`) sono necessari solo per alcuni tool specifici — vedi la
+`WP_APP_USER`, `WP_APP_PASSWORD`). Gli altri campi (`WP_ADMIN_*`) sono necessari solo per alcuni tool specifici — vedi la
 sezione "Configurazione" del `README.md` di questo repo.
 
 Se userai i tool che passano da automazione browser (modifica prezzo
