@@ -96,6 +96,14 @@ pagina Releases.
   mostra le varianti che nascerebbero. Solo con `anteprima=False` crea davvero. Due modi
   per dare gli attributi, vedi sotto.
 - `prodotti_in_bozza` — elenco dei prodotti creati e non ancora pubblicati.
+- **Blog** (articoli scritti dall'assistente, sempre in bozza): `leggi_brief_blog` e `salva_brief_blog`
+  (argomento, pubblico, tono, lingua, lunghezza, categorie di prodotti, note), `contesto_blog` (negozio,
+  prodotti con indirizzo e immagine, articoli già presenti), `lista_articoli_blog`, `leggi_articolo_blog`,
+  `carica_immagine_blog` (immagine dell'utente con ALT), `crea_articolo_bozza` e `aggiorna_articolo_bozza`.
+  Le due ultime restituiscono `avvisi` sui controlli on-page (frase chiave, H2, titolo SEO e meta description,
+  link interni ed esterni, lunghezza rispetto al brief, segnaposto). Un titolo già usato viene rifiutato e un
+  articolo pubblicato non si modifica da qui. Il server istruisce l'assistente a usare solo informazioni
+  verificabili e a non pubblicare mai.
 - `pubblica_prodotti` — pubblica bozze (max 50 per volta). **Azione visibile a tutti, sempre in due
   tempi:** l'anteprima (predefinita) non pubblica niente, elenca cosa verrebbe pubblicato con gli
   avvisi (niente immagine, SEO vuota...) e cosa no con i motivi (niente prezzo, varianti sbagliate),
