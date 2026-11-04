@@ -10,6 +10,14 @@ async def test_list_tools():
         result = await client.list_tools()
         assert {t.name for t in result.tools} == {
             "somma",
+            "leggi_brief_blog",
+            "salva_brief_blog",
+            "contesto_blog",
+            "lista_articoli_blog",
+            "leggi_articolo_blog",
+            "carica_immagine_blog",
+            "crea_articolo_bozza",
+            "aggiorna_articolo_bozza",
             "saluta",
             "lista_prodotti",
             "crea_prodotto",

@@ -17,6 +17,7 @@ from mcp.server.mcpserver import MCPServer
 from push_contempt_mcp import (
     alt_tools,
     azioni_pubbliche_tools,
+    blog_tools,
     browser_tools,
     cache_tools,
     catalog_health,
@@ -107,7 +108,28 @@ mcp = MCPServer(
         "(anteprima e ok dell'utente). Un prodotto con avvisi (niente immagine, campi SEO "
         "vuoti) si puo' pubblicare se l'utente lo vuole, ma diglielo; i bloccanti (niente "
         "prezzo, varianti sbagliate) si correggono in wp-admin. Spostare una categoria cambia "
-        "il suo indirizzo: riporta sempre l'avviso sul redirect."
+        "il suo indirizzo: riporta sempre l'avviso sul redirect.\n\n"
+        "BLOG: scrivi articoli per il blog del negozio, sempre in BOZZA (non pubblicarli mai: "
+        "li pubblica l'utente da wp-admin). Flusso: (1) leggi_brief_blog; se `compilato` e' "
+        "falso chiedi all'utente argomento, pubblico e tono (o ricavali dalla sua richiesta) e "
+        "salvali con salva_brief_blog. (2) contesto_blog: negozio, categorie, prodotti con "
+        "indirizzo e immagine, articoli gia' presenti. (3) Proponi all'utente il piano: per "
+        "ogni articolo titolo, frase chiave, prodotti da linkare; non ripetere argomenti di "
+        "`articoli_esistenti`; al massimo `n_articoli` del brief per volta; aspetta il suo ok. "
+        "(4) Scrivi ogni articolo in HTML (H2/H3, niente H1), nella `lingua` e con il `tono` e le "
+        "`note` del brief, lungo circa `lunghezza_parole`. Regole sui contenuti: usa solo "
+        "informazioni che puoi verificare (cerca fonti sul web se hai lo strumento) e linka "
+        "almeno una fonte autorevole; mai inventare dati, statistiche, citazioni, premi o "
+        "caratteristiche dei prodotti; se non sai una cosa non scriverla. Link interni solo agli "
+        "indirizzi reali di contesto_blog, mai prezzi nel testo (cambiano). Testo ORIGINALE: se "
+        "prendi spunto da un concorrente controlla_somiglianza e fai scegliere il livello "
+        "all'utente prima di salvare. (5) Immagini: non generarne. Riusa `immagine_url` / "
+        "`immagine_id` dei prodotti di contesto_blog oppure carica file dell'utente con "
+        "carica_immagine_blog (ALT descrittivo obbligatorio); metti un'immagine in evidenza. "
+        "(6) crea_articolo_bozza, poi correggi gli `avvisi` con aggiorna_articolo_bozza. Se "
+        "rifiuta un titolo gia' usato non forzare con consenti_duplicato: dillo all'utente. "
+        "(7) Alla fine riporta per ogni articolo titolo, parole, link e `url_modifica`, e gli "
+        "avvisi che restano. Ricorda che le bozze vanno riviste da una persona prima di uscire."
     ),
 )
 
@@ -291,6 +313,134 @@ def prodotti_in_bozza() -> list[dict]:
     pubblicarle c'e' pubblica_prodotti (anteprima e conferma dell'utente).
     """
     return product_tools.prodotti_in_bozza()
+
+
+@mcp.tool()
+def leggi_brief_blog() -> dict:
+    """Le indicazioni del negozio per il blog: argomento, pubblico, tono, lingua,
+    lunghezza in parole, quanti articoli per volta, categorie di prodotti da far comparire
+    e note libere. `compilato` e' falso finche' manca l'argomento."""
+    return blog_tools.leggi_brief_blog()
+
+
+@mcp.tool()
+def salva_brief_blog(
+    argomento: str | None = None,
+    pubblico: str | None = None,
+    tono: str | None = None,
+    lingua: str | None = None,
+    lunghezza_parole: int | None = None,
+    n_articoli: int | None = None,
+    categorie_prodotti: list[int] | None = None,
+    note: str | None = None,
+) -> dict:
+    """Aggiorna il brief del blog: cambiano solo i campi passati. `lingua` e' un codice
+    come "it" o "en-GB"; `lunghezza_parole` 300-3000; `n_articoli` 1-10 (quanti articoli
+    scrivere per volta); `categorie_prodotti` sono gli id delle categorie prodotto da far
+    comparire (lista_categorie_prodotti); `note` sono regole libere (per esempio AEO/GEO).
+    Salva solo cio' che l'utente ha detto o confermato."""
+    return blog_tools.salva_brief_blog(
+        argomento, pubblico, tono, lingua, lunghezza_parole, n_articoli, categorie_prodotti, note
+    )
+
+
+@mcp.tool()
+def contesto_blog() -> dict:
+    """Il materiale per scrivere articoli coerenti col negozio: dati del sito, brief,
+    categorie di prodotti e del blog, i prodotti piu' venduti (con `url`, `immagine_id` e
+    `immagine_url` per linkarli e riusarne le foto) e gli articoli gia' presenti (per non
+    ripetere gli argomenti). Chiamalo prima di proporre un piano di articoli."""
+    return blog_tools.contesto_blog()
+
+
+@mcp.tool()
+def lista_articoli_blog(
+    stato: str = "any", ricerca: str = "", limite: int = 50
+) -> list[dict] | dict:
+    """Articoli del blog, piu' recenti prima, con parole, link interni/esterni e prodotti
+    collegati. `stato`: "any" (default), "draft" (bozze da rivedere) o "publish"."""
+    return blog_tools.lista_articoli(stato, ricerca, limite)
+
+
+@mcp.tool()
+def leggi_articolo_blog(articolo_id: int) -> dict:
+    """Un articolo per intero (testo HTML, categorie, tag, titolo SEO, meta description,
+    frase chiave), per rivederlo o correggerlo."""
+    return blog_tools.leggi_articolo(articolo_id)
+
+
+@mcp.tool()
+def carica_immagine_blog(percorso: str, alt: str) -> dict:
+    """Carica un'immagine dell'utente (percorso sul computer dove gira questo server) nella
+    libreria media con il suo testo ALT e restituisce `id` (per l'immagine in evidenza) e
+    `url` (per metterla nel testo con <img>). L'ALT descrive cosa mostra l'immagine."""
+    return blog_tools.carica_immagine_blog(percorso, alt)
+
+
+@mcp.tool()
+def crea_articolo_bozza(
+    titolo: str,
+    contenuto: str,
+    frase_chiave_focus: str,
+    titolo_seo: str,
+    meta_description: str,
+    categoria: str | None = None,
+    tag: list[str] | None = None,
+    estratto: str | None = None,
+    immagine_evidenza_id: int | None = None,
+    prodotti_ids: list[int] | None = None,
+    consenti_duplicato: bool = False,
+) -> dict:
+    """Crea un articolo del blog in BOZZA: mai pubblicato, lo pubblica l'utente da wp-admin.
+    `contenuto` e' HTML con H2/H3 (niente H1: il titolo lo e' gia'). `titolo_seo` fino a 60
+    caratteri, `meta_description` 120-160. `prodotti_ids` sono i prodotti che l'articolo
+    promuove. Restituisce `articolo_id`, `url_modifica`, parole, link e `avvisi` da correggere
+    con aggiorna_articolo_bozza. Un titolo gia' usato viene rifiutato: non usare
+    consenti_duplicato senza che l'utente lo voglia."""
+    return blog_tools.crea_articolo_bozza(
+        titolo,
+        contenuto,
+        frase_chiave_focus,
+        titolo_seo,
+        meta_description,
+        categoria,
+        tag,
+        estratto,
+        immagine_evidenza_id,
+        prodotti_ids,
+        consenti_duplicato,
+    )
+
+
+@mcp.tool()
+def aggiorna_articolo_bozza(
+    articolo_id: int,
+    titolo: str | None = None,
+    contenuto: str | None = None,
+    frase_chiave_focus: str | None = None,
+    titolo_seo: str | None = None,
+    meta_description: str | None = None,
+    categoria: str | None = None,
+    tag: list[str] | None = None,
+    estratto: str | None = None,
+    immagine_evidenza_id: int | None = None,
+    prodotti_ids: list[int] | None = None,
+) -> dict:
+    """Modifica una BOZZA di blog (solo i campi passati). Un articolo gia' pubblicato viene
+    rifiutato: va cambiato da wp-admin. Restituisce gli `avvisi` aggiornati sul testo completo."""
+    return blog_tools.aggiorna_articolo_bozza(
+        articolo_id,
+        titolo,
+        contenuto,
+        frase_chiave_focus,
+        titolo_seo,
+        meta_description,
+        categoria,
+        tag,
+        estratto,
+        immagine_evidenza_id,
+        prodotti_ids,
+    )
 
 
 @mcp.tool()
