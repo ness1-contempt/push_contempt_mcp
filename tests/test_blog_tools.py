@@ -276,3 +276,51 @@ def test_il_conteggio_parole_del_plugin_ha_la_precedenza():
 
     assert not any("circa 500" in a for a in con_plugin)
     assert any("circa 3 parole" in a for a in senza_plugin)
+
+
+def test_il_brief_con_aeo_geo_attivo_riceve_le_regole(monkeypatch):
+    _finto(monkeypatch, {("GET", "blog/brief"): _Risposta({"ottimizza_aeo_geo": True})})
+
+    brief = blog_tools.leggi_brief_blog()
+
+    assert brief["regole_aeo_geo"] == blog_tools.REGOLE_AEO_GEO
+    assert "40-60 parole" in brief["regole_aeo_geo"]
+
+
+def test_il_brief_con_aeo_geo_spento_o_senza_opzione_non_ha_regole(monkeypatch):
+    _finto(monkeypatch, {("GET", "blog/brief"): _Risposta({"ottimizza_aeo_geo": False})})
+    assert "regole_aeo_geo" not in blog_tools.leggi_brief_blog()
+
+    _finto(monkeypatch, {("GET", "blog/brief"): _Risposta({"argomento": "x"})})
+    assert "regole_aeo_geo" not in blog_tools.leggi_brief_blog()
+
+
+def test_un_errore_del_plugin_non_riceve_regole(monkeypatch):
+    corpo = {"code": "x", "message": "no", "data": {"status": 500}}
+    _finto(monkeypatch, {("GET", "blog/brief"): _Risposta(corpo, 500)})
+
+    assert "regole_aeo_geo" not in blog_tools.leggi_brief_blog()
+
+
+def test_il_contesto_porta_le_regole_dentro_il_brief(monkeypatch):
+    contesto = {"brief": {"ottimizza_aeo_geo": True}, "prodotti": []}
+    _finto(monkeypatch, {("GET", "blog/contesto"): _Risposta(contesto)})
+
+    assert blog_tools.contesto_blog()["brief"]["regole_aeo_geo"] == blog_tools.REGOLE_AEO_GEO
+
+
+def test_salva_brief_manda_l_opzione_e_restituisce_le_regole(monkeypatch):
+    chiamate = _finto(monkeypatch, {("POST", "blog/brief"): _Risposta({"ottimizza_aeo_geo": True})})
+
+    risposta = blog_tools.salva_brief_blog(ottimizza_aeo_geo=True)
+
+    assert chiamate[0]["json"] == {"ottimizza_aeo_geo": True}
+    assert "regole_aeo_geo" in risposta
+
+
+def test_le_regole_non_dipendono_da_file_e_non_chiedono_cose_fuori_dall_articolo():
+    regole = blog_tools.REGOLE_AEO_GEO
+
+    assert "Regole di ottimizzazione" not in regole  # nessun rimando ai file dell'utente
+    assert "<table>" in regole and "<ol>" in regole and "domande frequenti" in regole
+    assert "Mai inventarli" in regole

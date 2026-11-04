@@ -117,7 +117,12 @@ mcp = MCPServer(
         "ogni articolo titolo, frase chiave, prodotti da linkare; non ripetere argomenti di "
         "`articoli_esistenti`; al massimo `n_articoli` del brief per volta; aspetta il suo ok. "
         "(4) Scrivi ogni articolo in HTML (H2/H3, niente H1), nella `lingua` e con il `tono` e le "
-        "`note` del brief, lungo circa `lunghezza_parole`. Regole sui contenuti: usa solo "
+        "`note` del brief, lungo circa `lunghezza_parole`. Se il brief ha `ottimizza_aeo_geo` "
+        "attivo, leggi_brief_blog e contesto_blog restituiscono `regole_aeo_geo`: applicale a "
+        "ogni articolo (domande come sottotitoli con risposta di 40-60 parole, elenchi e "
+        "tabelle vere, FAQ finale, contenuto originale); se "
+        "una regola spingesse a scrivere qualcosa di non verificato vince la regola di non "
+        "inventare. Regole sui contenuti: usa solo "
         "informazioni che puoi verificare (cerca fonti sul web se hai lo strumento) e linka "
         "almeno una fonte autorevole; mai inventare dati, statistiche, citazioni, premi o "
         "caratteristiche dei prodotti; se non sai una cosa non scriverla. Link interni solo agli "
@@ -333,14 +338,24 @@ def salva_brief_blog(
     n_articoli: int | None = None,
     categorie_prodotti: list[int] | None = None,
     note: str | None = None,
+    ottimizza_aeo_geo: bool | None = None,
 ) -> dict:
     """Aggiorna il brief del blog: cambiano solo i campi passati. `lingua` e' un codice
     come "it" o "en-GB"; `lunghezza_parole` 300-3000; `n_articoli` 1-10 (quanti articoli
     scrivere per volta); `categorie_prodotti` sono gli id delle categorie prodotto da far
-    comparire (lista_categorie_prodotti); `note` sono regole libere (per esempio AEO/GEO).
-    Salva solo cio' che l'utente ha detto o confermato."""
+    comparire (lista_categorie_prodotti); `note` sono regole libere; `ottimizza_aeo_geo` (attivo
+    di base) fa restituire le regole AEO/GEO da applicare agli articoli. Salva solo cio'
+    che l'utente ha detto o confermato."""
     return blog_tools.salva_brief_blog(
-        argomento, pubblico, tono, lingua, lunghezza_parole, n_articoli, categorie_prodotti, note
+        argomento,
+        pubblico,
+        tono,
+        lingua,
+        lunghezza_parole,
+        n_articoli,
+        categorie_prodotti,
+        note,
+        ottimizza_aeo_geo,
     )
 
 

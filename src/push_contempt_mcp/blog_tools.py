@@ -16,6 +16,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from push_contempt_mcp.regole_blog import REGOLE_AEO_GEO
+
 load_dotenv()
 
 # Lunghezze consigliate da Yoast e dai motori di ricerca (caratteri).
@@ -77,10 +79,19 @@ def _chiama(metodo: str, percorso: str, **richiesta) -> dict | list:
     return risposta.json()
 
 
+def _con_regole(brief: dict) -> dict:
+    """Aggiunge `regole_aeo_geo` al brief se l'opzione `ottimizza_aeo_geo` e' attiva: il
+    testo delle regole sta nel server, cosi' non dipende da nessun file dell'utente."""
+    if "errore" not in brief and brief.get("ottimizza_aeo_geo"):
+        brief["regole_aeo_geo"] = REGOLE_AEO_GEO
+    return brief
+
+
 def leggi_brief_blog() -> dict:
     """Le indicazioni del negozio per il blog (argomento, pubblico, tono, lingua,
-    lunghezza, quanti articoli, categorie di prodotti, note) e `compilato`."""
-    return _chiama("GET", "blog/brief")
+    lunghezza, quanti articoli, categorie di prodotti, note, `ottimizza_aeo_geo`) e
+    `compilato`. Con l'ottimizzazione AEO/GEO attiva c'e' anche `regole_aeo_geo`."""
+    return _con_regole(_chiama("GET", "blog/brief"))
 
 
 def salva_brief_blog(
@@ -92,6 +103,7 @@ def salva_brief_blog(
     n_articoli: int | None = None,
     categorie_prodotti: list[int] | None = None,
     note: str | None = None,
+    ottimizza_aeo_geo: bool | None = None,
 ) -> dict:
     """Aggiorna il brief: cambiano solo i campi passati, gli altri restano."""
     campi = {
@@ -103,14 +115,20 @@ def salva_brief_blog(
         "n_articoli": n_articoli,
         "categorie_prodotti": categorie_prodotti,
         "note": note,
+        "ottimizza_aeo_geo": ottimizza_aeo_geo,
     }
-    return _chiama("POST", "blog/brief", json={k: v for k, v in campi.items() if v is not None})
+    return _con_regole(
+        _chiama("POST", "blog/brief", json={k: v for k, v in campi.items() if v is not None})
+    )
 
 
 def contesto_blog() -> dict:
     """Negozio, brief, categorie di prodotti e del blog, prodotti piu' venduti (con
     indirizzo e immagine) e articoli gia' presenti."""
-    return _chiama("GET", "blog/contesto")
+    contesto = _chiama("GET", "blog/contesto")
+    if isinstance(contesto.get("brief"), dict):
+        _con_regole(contesto["brief"])
+    return contesto
 
 
 def lista_articoli(stato: str = "any", ricerca: str = "", limite: int = 50) -> list[dict] | dict:

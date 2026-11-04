@@ -97,7 +97,8 @@ pagina Releases.
   per dare gli attributi, vedi sotto.
 - `prodotti_in_bozza` — elenco dei prodotti creati e non ancora pubblicati.
 - **Blog** (articoli scritti dall'assistente, sempre in bozza): `leggi_brief_blog` e `salva_brief_blog`
-  (argomento, pubblico, tono, lingua, lunghezza, categorie di prodotti, note), `contesto_blog` (negozio,
+  (argomento, pubblico, tono, lingua, lunghezza, categorie di prodotti, note e `ottimizza_aeo_geo`: attivo, il
+  brief include `regole_aeo_geo`, le regole AEO/GEO contenute nel server), `contesto_blog` (negozio,
   prodotti con indirizzo e immagine, articoli già presenti), `lista_articoli_blog`, `leggi_articolo_blog`,
   `carica_immagine_blog` (immagine dell'utente con ALT), `crea_articolo_bozza` e `aggiorna_articolo_bozza`.
   Le due ultime restituiscono `avvisi` sui controlli on-page (frase chiave, H2, titolo SEO e meta description,
