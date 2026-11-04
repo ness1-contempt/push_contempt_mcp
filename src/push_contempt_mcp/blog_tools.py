@@ -176,13 +176,14 @@ def valida_articolo(
     n_link_interni: int | None = None,
     n_link_esterni: int | None = None,
     ha_immagine_evidenza: bool = True,
+    n_parole: int | None = None,
 ) -> list[str]:
     """Controlli on-page che non servono all'AI: frase chiave nel testo e nei sottotitoli,
     struttura, lunghezze di titolo SEO e meta description, link interni ed esterni,
     segnaposto dimenticati. Restituisce gli avvisi da correggere (vuota se va bene)."""
     avvisi: list[str] = []
     testo = re.sub(r"<[^>]+>", " ", contenuto)
-    parole = len(testo.split())
+    parole = n_parole if n_parole is not None else len(testo.split())
     frase = frase_chiave_focus.strip().lower()
 
     if frase:
@@ -258,6 +259,7 @@ def _con_avvisi(
             risultato.get("n_link_interni"),
             risultato.get("n_link_esterni"),
             ha_immagine_evidenza,
+            risultato.get("n_parole"),
         )
     return risultato
 

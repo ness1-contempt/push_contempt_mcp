@@ -266,3 +266,13 @@ def test_carica_immagine_la_manda_a_wordpress_e_imposta_l_alt(monkeypatch, tmp_p
     assert chiamate[0]["data"] == b"finta-immagine"
     assert chiamate[1]["url"].endswith("/wp/v2/media/55")
     assert chiamate[1]["json"] == {"alt_text": "Zaino rosso su un sentiero"}
+
+
+def test_il_conteggio_parole_del_plugin_ha_la_precedenza():
+    corto = "<h2>zaino</h2><p>zaino zaino</p>"
+
+    con_plugin = blog_tools.valida_articolo(corto, "zaino", "T", META_OK, 100, n_parole=500)
+    senza_plugin = blog_tools.valida_articolo(corto, "zaino", "T", META_OK, 100)
+
+    assert not any("circa 500" in a for a in con_plugin)
+    assert any("circa 3 parole" in a for a in senza_plugin)
